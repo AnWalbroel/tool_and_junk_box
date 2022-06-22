@@ -548,6 +548,20 @@ def convert_abshum_to_relhum(
 	return relhum
 
 
+def Z_from_GP(
+	gp):
+
+	"""
+	Computes geopotential height (in m) from geopotential.
+
+	Parameters:
+	gp : float or array of float
+		Geopotential in m^2 s^-2.
+	"""
+
+	return gp / g
+
+
 def ZR_rain_rate(
 	Z,
 	dsd='mp'):
