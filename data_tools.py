@@ -600,6 +600,60 @@ def find_files_daterange(
 	return files
 
 
+def vector_intersection_2d(
+	A1,
+	A2,
+	B1,
+	B2):
+
+	"""
+	Compute the intersection point between two 2D vectors (a: A1->A2 and b: B1->B2).
+	a = A1 + nn*(A2 - A1)
+	b = B1 + mm*(B2 - B1)
+	Points A1 and A2 must not be identical. The same applies for B1 and B2.
+
+	Parameters:
+	-----------
+	A1 : 2D array of float
+		Origin of the first 2D vector a.
+	A2 : 2D array of float
+		Endpoint of the first 2D vector a.
+	B1 : 2D array of float
+		Origin of the second 2D vector b.
+	B2 : 2D array of float
+		Endpoint of the second 2D vector b.
+	"""
+
+	A1x = A1[0]
+	A1y = A1[1]
+	A2x = A2[0]
+	A2y = A2[1]
+	B1x = B1[0]
+	B1y = B1[1]
+	B2x = B2[0]
+	B2y = B2[1]
+
+	if A1x == A2x:
+		aa = (B1x - A1x - (B1y - A1y)*(A2x - A1x) / (A2y - A1y))
+		bb = ((B2y - B1y)*(A2x - A1x) / (A2y - A1y) - B2x + B1x)
+		if bb == 0:
+			mm = np.inf
+		else:
+			mm = aa / bb
+		nn = (B1y - A1y + mm*(B2y - B1y)) / (A2y - A1y)
+
+	else:
+		aa = (B1y - A1y - (B1x - A1x)*(A2y - A1y) / (A2x - A1x))
+		bb = ((B2x - B1x)*(A2y - A1y) / (A2x - A1x) - B2y + B1y)
+		if bb == 0:
+			mm = np.inf
+		else:
+			mm = aa / bb
+		nn = (B1x - A1x + mm*(B2x - B1x)) / (A2x - A1x)
+
+	return mm, nn
+
+
 def time_prematurely_bursted_sondes():
 
 	"""
