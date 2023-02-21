@@ -16,9 +16,9 @@ import pdb
 
 """
 	Script to prepare IASI data for Polarstern track. Import IASI and Polarstern track data, cut
-	the data and export IASI data to a new, smaller file. Call this script via 
-	"python3 manage_iasi.py" or append a digit between 0 and 19 for the IASI subfolders, i.e.,
-	"python3 manage_iasi.py 14".
+	the data and export IASI data to a new, smaller file. No averages will be computed, all found 
+	pixels will be saved. Call this script via "python3 manage_iasi.py" or append a digit 
+	between 0 and 19 for the IASI subfolders, i.e.,	"python3 manage_iasi.py 14".
 	- import data (iasi, polarstern track)
 	- find spatio-temporal overlap
 	- export IASI data to file
