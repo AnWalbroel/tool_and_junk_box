@@ -79,8 +79,8 @@ def running_mean_datetime(x, N, t):
 	# run through the array:
 	look_save = 0
 	for k in range(n_x):	# k, t_c in enumerate(t)?
-		if k%400000 == 0: print(k/n_x)	# output required to avoid the ssh connection to
-											# be automatically dropped
+		if k%400000 == 0: print(k/n_x)	# output required to avoid ssh connection to
+										# be automatically dropped
 
 		# Identify the correct running mean window width from the current
 		# time t_c:
@@ -114,6 +114,78 @@ def running_mean_datetime(x, N, t):
 	return x_m
 
 
+def running_mean_time_2D(x, N, t, axis=0):
+
+	"""
+	Moving average of a 2D+ array x with a window width of N in seconds.
+	The moving average will be taken over the specifiec axis.
+	Here it is required to find out the actual window range. E.g. if
+	the desired window width is 300 seconds but the measurement rate
+	is one/minute, the actual window width is 5.
+
+	Parameters:
+	-----------
+	x : array of floats
+		Data array (multi-dim) of which the running mean is to be taken for a
+		certain axis.
+	N : int
+		Running mean window width in seconds.
+	t : array of floats
+		1D time vector (in seconds since a reference time) required to
+		compute the actual running mean window width.
+	axis : int
+		Indicates, which axis represents the time axis, over which the moving
+		average will be taken. Default: 0
+	"""
+
+	# check if shape of x is correct:
+	n_x = x.shape[axis]
+	assert n_x == len(t)
+
+	x = x.astype(np.float64)
+	x_m = copy.deepcopy(x)
+
+	is_even = (N%2 == 0)		# if N is even: is_even is True
+
+	# inquire mean delta time to get an idea of how broad a window
+	# must be (roughly) <-> used to speed up computation time:
+	mdt = np.nanmean(np.diff(t))
+	look_range = int(np.ceil(N/mdt))
+	
+	# run through the array:
+	look_save = 0
+	for k in range(n_x):	# k, t_c in enumerate(t)?
+		if k%400000 == 0: print(k/n_x)	# output required to avoid ssh connection to
+										# be automatically dropped
+
+		# Identify the correct running mean window width from the current
+		# time t_c:
+		t_c = t[k]
+		if is_even:	# even:
+			t_c_plus = t_c + int(N/2)
+			t_c_minus = t_c - int(N/2)
+		else:			# odd:
+			t_c_plus = t_c + int(N/2) + 1
+			t_c_minus = t_c - int(N/2)
+
+
+		if (k > look_range) and (k < n_x - look_range):	# in between
+			look_save = k-look_range
+			rm_range = np.argwhere((t[k-look_range:k+look_range] >= t_c_minus) & (t[k-look_range:k+look_range] <= t_c_plus)).flatten() + look_save
+		elif k <= look_range: 	# lower end of array
+			look_save = 0
+			rm_range = np.argwhere((t[:k+look_range] >= t_c_minus) & (t[:k+look_range] <= t_c_plus)).flatten()
+		else:	# upper end of array
+			look_save = k-look_range
+			rm_range = np.argwhere((t[k-look_range:] >= t_c_minus) & (t[k-look_range:] <= t_c_plus)).flatten() + look_save
+			
+
+		# moving average:
+		x_m[k] = np.mean(x[rm_range], axis=axis)
+	
+	return x_m
+
+
 def datetime_to_epochtime(dt_array):
 	
 	"""
@@ -142,6 +214,7 @@ def numpydatetime64_to_epochtime(npdt_array):
 	"""
 	Converts numpy datetime64 array to array in seconds since 1970-01-01 00:00:00 UTC (type:
 	float).
+	Alternatively, just use "some_array.astype(np.float64)".
 
 	Parameters:
 	-----------
@@ -245,11 +318,12 @@ def compute_DOY(
 def break_str_into_lines(
 	le_string,
 	n_max,
-	split_at=' '):
+	split_at=' ',
+	keep_split_char=False):
 
 	"""
 	Break a long strings into multiple lines if a certain number of chars may
-	not be exceeded per line. String will be split into two line if its length
+	not be exceeded per line. String will be split into two lines if its length
 	is > n_max but <= 2*n_max.
 
 	Parameters:
@@ -260,6 +334,9 @@ def break_str_into_lines(
 		Max number of chars allowed in one line.
 	split_at : str
 		Character to look for where the string will be broken. Default: space ' '
+	keep_split_char : bool
+		If True, the split char indicated by split_at will not be removed (useful for "-" as split char).
+		Default: False
 	"""
 
 	n_str = len(le_string)
@@ -273,12 +350,37 @@ def break_str_into_lines(
 
 		for k in range(n_lines):
 			space_place = le_string_bw.find(split_at, n_str - (k+1)*n_max)
-			le_string_bw = le_string_bw[:space_place] + new_line_str + le_string_bw[space_place+1:]
+			if keep_split_char:
+				le_string_bw = le_string_bw[:space_place].replace("\n","") + new_line_str + le_string_bw[space_place:]
+			else:
+				le_string_bw = le_string_bw[:space_place] + new_line_str + le_string_bw[space_place+1:]
 
 		# reverse the string again
 		le_string = le_string_bw[::-1]
 
 	return le_string
+
+
+def bin_to_dec(b_in):
+
+	"""
+	Converts a binary number given as string to normal decimal number (as integer).
+
+	Parameters:
+	-----------
+	b_in : str
+		String of a binary number that may either directly start with the
+		binary number or start with "0b".
+	"""
+
+	d_out = 0		# output as decimal number (int or float)
+	if "b" in b_in:
+		b_in = b_in[b_in.find("b")+1:]	# actual bin number starts after "b"
+	b_len = len(b_in)
+
+	for ii, a in enumerate(b_in): d_out += int(a)*2**(b_len-ii-1)
+
+	return d_out
 
 
 def compute_retrieval_statistics(
@@ -307,8 +409,7 @@ def compute_retrieval_statistics(
 					'R': np.corrcoef(x_stuff[where_nonnan], y_stuff[where_nonnan])[0,1]}
 
 	if compute_stddev:
-		y_stuff -= stat_dict['bias']
-		stat_dict['stddev'] = np.sqrt(np.nanmean((x_stuff - y_stuff)**2))
+		stat_dict['stddev'] = np.sqrt(np.nanmean((x_stuff - (y_stuff - stat_dict['bias']))**2))
 
 	return stat_dict
 
@@ -319,7 +420,7 @@ def compute_RMSE_profile(
 	which_axis=0):
 
 	"""
-	Compute RMSE 'profile' of a (height x time)-matrix (e.g. temperature profile):
+	Compute RMSE 'profile' of a i.e., (height x time)-matrix (e.g. temperature profile):
 	RMSE(z_i) = sqrt(mean((x - x_o)^2, dims='time'))
 	
 	Parameters:
@@ -339,24 +440,108 @@ def compute_RMSE_profile(
 	return np.sqrt(np.nanmean((x - x_o)**2, axis=which_axis))
 
 
+def build_K_reg(
+	y,
+	order=1):
+
+	"""
+	Constructs the observation matrix typically used for regression retrievals where the
+	rows indicate the samples (i.e., time series). The first column usually contains "1"
+	only and the remaining columns contain observations in first and higher order.
+
+	Parameters:
+	-----------
+	y : array of floats
+		Observation vector. Must be a numpy array with M observations and N samples. The 
+		shape must be N x M. (Also if M == 1, y must be a 2D array.)
+	order : int
+		Defines the order of the regression equation. Options: i.e., 1, 2, 3. Default:
+		1
+	"""
+
+	n_obs = y.shape[1]		# == M
+	n_samples = y.shape[0]	# == N
+
+	assert y.shape == (n_samples,n_obs)
+
+	# generate regression matrix K out of obs vector:
+	K_reg = np.ones((n_samples, order*n_obs+1))
+	K_reg[:,1:n_obs+1] = y
+
+	if order > 1:
+		for kk in range(order-1):
+			jj = kk + 1
+			K_reg[:,jj*n_obs+1:(jj+1)*n_obs+1] = y**(jj+1)
+
+	return K_reg
+
+
+def regression(
+	x,
+	y,
+	order=1):
+	
+	"""
+	Computes regression coefficients m_est to map observations y (i.e., brightness temperatures)
+	to state variable x (i.e., temperature profile at one height level, or IWV). The regression
+	order can also be specified.
+	
+	Parameters:
+	-----------
+	x : array of floats
+		State variable vector. Must be a numpy array with N samples (N = training data size).
+	y : array of floats
+		Observation vector. Must be a numpy array with M observations (i.e., M frequencies) 
+		and N samples. The shape must be N x M. (Also if M == 1, y must be a 2D array.)
+	order : int
+		Defines the order of the regression equation. Options: i.e., 1, 2, 3. Default:
+		1
+	"""
+
+	# Generate matrix from observations:
+	K_reg = build_K_reg(y, order)
+
+	# compute m_est
+	K_reg_T = K_reg.T
+	m_est = np.linalg.inv(K_reg_T.dot(K_reg)).dot(K_reg_T).dot(x)
+
+	return m_est
+
+
 def Gband_double_side_band_average(
 	TB,
-	freqs):
+	freqs,
+	xarray_compatibility=False,
+	freq_dim_name=""):
 
 	"""
 	Computes the double side band average of TBs that contain both
 	sides of the G band absorption line. Returns either only the TBs
 	or both the TBs and frequency labels with double side band avg.
+	If xarray_compatibility is True, also more dimensional TB arrays
+	can be included. Then, also the frequency dimension name must be
+	supplied.
 
 	Parameters:
 	-----------
 	TB : array of floats
 		Brightness temperature array. Must have the following shape
-		(time x frequency).
+		(time x frequency). More dimensions and other shapes are only
+		allowed if xarray_compatibility=True.
 	freqs : array of floats
 		1D Array containing the frequencies of the TBs. The array must be
 		sorted in ascending order.
+	xarray_compatibility : bool
+		If True, xarray utilities can be used, also allowing TBs of other
+		shapes than (time x frequency). Then, also freq_dim_name must be
+		provided.
+	freq_dim_name : str
+		Name of the xarray frequency dimension. Must be specified if 
+		xarray_compatibility=True.
 	"""
+
+	if xarray_compatibility and not freq_dim_name:
+		raise ValueError("Please specify 'freq_dim_name' when using the xarray compatible mode.")
 
 	# Double side band average for G band if G band frequencies are available, which must first be clarified:
 	# Determine, which frequencies are around the G band w.v. absorption line:
@@ -366,36 +551,57 @@ def Gband_double_side_band_average(
 	non_g_freq = np.where(~((freqs > g_lower_end) & (freqs < g_upper_end)))[0]
 
 	TB_dsba = copy.deepcopy(TB)
-	
+
 	if g_freq.size > 0: # G band within frequencies
 		g_low = np.where((freqs <= 183.31) & (freqs >= g_lower_end))[0]
 		g_high = np.where((freqs >= 183.31) & (freqs <= g_upper_end))[0]
 
 		assert len(g_low) == len(g_high)
-		idx = g_low[0]
-		for jj in range(len(g_high)):
-			TB_dsba[:,jj] = (TB[:,g_low[-1-jj]] + TB[:,g_high[jj]])/2
-	
-	# truncate and append the unedited frequencies (e.g. 243 and 340 GHz):
-	TB_dsba = TB_dsba[:,:len(g_low)]
-	TB_dsba = np.concatenate((TB_dsba, TB[:,non_g_freq]), axis=1)
+		if not xarray_compatibility:
+			for jj in range(len(g_high)):
+				TB_dsba[:,jj] = (TB[:,g_low[-1-jj]] + TB[:,g_high[jj]])/2.0
 
-	# Now, the array just needs to be sorted correctly:
+		else:
+			for jj in range(len(g_high)):
+				TB_dsba[{freq_dim_name: jj}] = (TB[{freq_dim_name: g_low[-1-jj]}] + TB[{freq_dim_name: g_high[jj]}])/2.0
+
+
+	# Indices for sorting:
 	idx_have = np.concatenate((g_high, non_g_freq), axis=0)
 	idx_sorted = np.argsort(idx_have)
 
-	TB_dsba = TB_dsba[:,idx_sorted]
+	# truncate and append the unedited frequencies (e.g. 243 and 340 GHz):
+	if not xarray_compatibility:
+		TB_dsba = TB_dsba[:,:len(g_low)]
+		TB_dsba = np.concatenate((TB_dsba, TB[:,non_g_freq]), axis=1)
 
-	# define freq_dsba (usually, the upper side of the G band is then used as
-	# frequency label:
-	freq_dsba = np.concatenate((freqs[g_high], freqs[non_g_freq]))[idx_sorted]
+		# Now, the array just needs to be sorted correctly:
+		TB_dsba = TB_dsba[:,idx_sorted]
+
+		# define freq_dsba (usually, the upper side of the G band is then used as
+		# frequency label:
+		freq_dsba = np.concatenate((freqs[g_high], freqs[non_g_freq]))[idx_sorted]
+
+	else:
+		TB_dsba = TB_dsba[{freq_dim_name: slice(0,len(g_low))}]
+		TB_dsba = xr.concat([TB_dsba, TB[{freq_dim_name: non_g_freq}]], dim=freq_dim_name)
+
+		# Now, the array just needs to be sorted correctly:
+		TB_dsba = TB_dsba[{freq_dim_name: idx_sorted}]
+
+		# define freq_dsba (usually, the upper side of the G band is then used as
+		# frequency label:
+		freq_dsba = xr.concat([freqs[g_high], freqs[non_g_freq]], dim=freq_dim_name)[idx_sorted]
+
 
 	return TB_dsba, freq_dsba
 
 
 def Fband_double_side_band_average(
 	TB,
-	freqs):
+	freqs,
+	xarray_compatibility=False,
+	freq_dim_name=""):
 
 	"""
 	Computes the double side band average of TBs that contain both
@@ -410,7 +616,17 @@ def Fband_double_side_band_average(
 	freqs : array of floats
 		1D Array containing the frequencies of the TBs. The array must be
 		sorted in ascending order.
+	xarray_compatibility : bool
+		If True, xarray utilities can be used, also allowing TBs of other
+		shapes than (time x frequency). Then, also freq_dim_name must be
+		provided.
+	freq_dim_name : str
+		Name of the xarray frequency dimension. Must be specified if 
+		xarray_compatibility=True.
 	"""
+
+	if xarray_compatibility and not freq_dim_name:
+		raise ValueError("Please specify 'freq_dim_name' when using the xarray compatible mode.")
 
 	# Double side band average for F band if F band frequencies are available, which must first be clarified:
 	# Determine, which frequencies are around the F band w.v. absorption line:
@@ -426,23 +642,41 @@ def Fband_double_side_band_average(
 		high = np.where((freqs >= 118.75) & (freqs <= upper_end))[0]
 
 		assert len(low) == len(high)
-		idx = low[0]
-		for jj in range(len(high)):
-			TB_dsba[:,jj] = (TB[:,low[-1-jj]] + TB[:,high[jj]])/2
-	
-	# truncate and append the unedited frequencies (e.g. 243 and 340 GHz):
-	TB_dsba = TB_dsba[:,:len(low)]
-	TB_dsba = np.concatenate((TB_dsba, TB[:,non_f_freq]), axis=1)
+		if not xarray_compatibility:
+			for jj in range(len(high)):
+				TB_dsba[:,jj] = (TB[:,low[-1-jj]] + TB[:,high[jj]])/2.0
 
-	# Now, the array just needs to be sorted correctly:
+		else:
+			for jj in range(len(high)):
+				TB_dsba[{freq_dim_name: jj}] = (TB[{freq_dim_name: low[-1-jj]}] + TB[{freq_dim_name: high[jj]}])/2.0
+
+
+	# Indices for sorting:
 	idx_have = np.concatenate((high, non_f_freq), axis=0)
 	idx_sorted = np.argsort(idx_have)
 
-	TB_dsba = TB_dsba[:,idx_sorted]
+	# truncate and append the unedited frequencies (e.g. 243 and 340 GHz):
+	if not xarray_compatibility:
+		TB_dsba = TB_dsba[:,:len(low)]
+		TB_dsba = np.concatenate((TB_dsba, TB[:,non_f_freq]), axis=1)
 
-	# define freq_dsba (usually, the upper side of the G band is then used as
-	# frequency label:
-	freq_dsba = np.concatenate((freqs[high], freqs[non_f_freq]))[idx_sorted]
+		# Now, the array just needs to be sorted correctly:
+		TB_dsba = TB_dsba[:,idx_sorted]
+
+		# define freq_dsba (usually, the upper side of the G band is then used as
+		# frequency label:
+		freq_dsba = np.concatenate((freqs[high], freqs[non_f_freq]))[idx_sorted]
+
+	else:
+		TB_dsba = TB_dsba[{freq_dim_name: slice(0,len(low))}]
+		TB_dsba = xr.concat([TB_dsba, TB[{freq_dim_name: non_f_freq}]], dim=freq_dim_name)
+
+		# Now, the array just needs to be sorted correctly:
+		TB_dsba = TB_dsba[{freq_dim_name: idx_sorted}]
+
+		# define freq_dsba (usually, the upper side of the G band is then used as
+		# frequency label:
+		freq_dsba = xr.concat([freqs[high], freqs[non_f_freq]], dim=freq_dim_name)[idx_sorted]
 
 	return TB_dsba, freq_dsba
 
@@ -462,12 +696,13 @@ def select_MWR_channels(
 	Parameters:
 	-----------
 	TB : array of floats
-		2D array (time x freq) of TBs (in K).
+		2D array (i.e., time x freq; freq must be the second dimension) of TBs (in K).
 	freq : array of floats
 		1D array of frequencies (in GHz).
 	band : str
 		Specify the frequencies to be selected. Valid options:
-		'K': 20-40 GHz, 'V': 50-60 GHz, 'W': 85-95 GHz, 'F': 110-130 GHz, 'G': 170-200 GHz
+		'K': 20-40 GHz, 'V': 50-60 GHz, 'W': 85-95 GHz, 'F': 110-130 GHz, 'G': 170-200 GHz,
+		'243/340': 240-350 GHz
 		Combinations are also possible: e.g. 'K+V+W' = 20-95 GHz
 	return_idx : int
 		If 0 the frq_idx list is not returned and merely TB and freq are returned.
@@ -479,7 +714,8 @@ def select_MWR_channels(
 					'V': [50, 60],
 					'W': [85, 95],
 					'F': [110, 130],
-					'G': [170, 200]}
+					'G': [170, 200],
+					'243/340': [240, 350]}
 
 	# split band input:
 	band_split = band.split('+')
@@ -652,83 +888,6 @@ def vector_intersection_2d(
 		nn = (B1x - A1x + mm*(B2x - B1x)) / (A2x - A1x)
 
 	return mm, nn
-
-
-def time_prematurely_bursted_sondes():
-
-	"""
-	This little function merely returns time stamps of MOSAiC radiosondes, whose
-	burst altitude was <= 10000 m.
-	"""
-
-	failed_sondes_dt = np.array([dt.datetime(2019, 10, 7, 11, 0),
-						dt.datetime(2019, 10, 15, 23, 0),
-						dt.datetime(2019, 11, 4, 11, 0),
-						dt.datetime(2019, 11, 17, 17, 0),
-						dt.datetime(2019, 12, 17, 5, 0),
-						dt.datetime(2019, 12, 24, 11, 0),
-						dt.datetime(2020, 1, 13, 11, 0),
-						dt.datetime(2020, 2, 1, 11, 0),
-						dt.datetime(2020, 2, 6, 23, 0),
-						dt.datetime(2020, 3, 9, 23, 0),
-						dt.datetime(2020, 3, 11, 17, 0),
-						dt.datetime(2020, 3, 29, 5, 0),
-						dt.datetime(2020, 5, 14, 17, 0),
-						dt.datetime(2020, 6, 14, 17, 0),
-						dt.datetime(2020, 6, 19, 11, 0),
-						dt.datetime(2020, 9, 27, 9, 0)])
-
-	reftime = dt.datetime(1970,1,1)
-	failed_sondes_t = np.asarray([datetime_to_epochtime(fst) for fst in failed_sondes_dt])
-	failed_sondes_t = np.asarray([(fst - reftime).total_seconds() for fst in failed_sondes_dt])
-	
-	return failed_sondes_t, failed_sondes_dt
-
-
-def outliers_per_eye(
-	flag,
-	time,
-	instrument,
-	filename=''):
-
-	"""
-	Manually detected outliers for the specified instrument will be flagged
-	in this routine.
-
-	Parameters:
-	-----------
-	flag : array of floats or int
-		Numpy array of flag values.
-	time : array of floats
-		Numpy array of time values in sec since 1970-01-01 00:00:00.
-	instrument : str
-		Either 'hatpro' or 'mirac'.
-	filename : str, optional
-		Must be specified if instrument='mirac'. The outlier .txt file must
-		be given with its path.
-	"""
-
-	if instrument not in ['hatpro', 'mirac']:
-		raise ValueError("'instrument' must be either 'hatpro' or 'mirac'.")
-
-	# manually detected outliers: [[start time, end time]]
-	if instrument == 'hatpro':
-		outliers_per_eye = import_HATPRO_outliers()
-	else:
-		if instrument == 'mirac' and 'MiRAC-P_outliers.txt' in filename:
-			outliers_per_eye = import_MiRAC_outliers(filename)
-		else:
-			raise ValueError("If the instrument is 'mirac', the filename must include the .txt file " + 
-					"of the MiRAC-P outliers!")
-
-	reftime = dt.datetime(1970,1,1)
-	for outlier_range in outliers_per_eye:
-		o_start = (outlier_range[0] - reftime).total_seconds()
-		o_end = (outlier_range[1] - reftime).total_seconds()
-
-		flag[(time >= o_start) & (time <= o_end)] = 99
-
-	return flag
 
 
 def filter_clear_sky_sondes_cloudnet(
@@ -941,56 +1100,6 @@ def syn_MWR_cut_useless_variables_RS(DS):
 	DS = DS.drop_vars(useless_vars)
 
 	return DS
-
-
-def import_HATPRO_outliers():
-	hatpro_outliers_per_eye = [[dt.datetime(2019,10,1,10,23), dt.datetime(2019,10,1,10,24)],
-							[dt.datetime(2019,10,1,10,38), dt.datetime(2019,10,1,10,39)],
-							[dt.datetime(2019,10,12,1,43), dt.datetime(2019,10,12,1,44)],
-							[dt.datetime(2019,10,21,6,30), dt.datetime(2019,10,21,6,31)],
-							[dt.datetime(2019,11,20,8,11), dt.datetime(2019,11,20,8,12)],
-							[dt.datetime(2019,11,20,8,35), dt.datetime(2019,11,20,8,36)],
-							[dt.datetime(2019,11,20,8,42), dt.datetime(2019,11,20,8,43)],
-							[dt.datetime(2019,11,20,8,51), dt.datetime(2019,11,20,8,52)],
-							[dt.datetime(2020,1,2,3,18), dt.datetime(2020,1,2,3,25)],
-							[dt.datetime(2020,1,19,21,29), dt.datetime(2020,1,19,21,35)],
-							[dt.datetime(2020,4,5,13,14), dt.datetime(2020,4,5,13,20)],
-							[dt.datetime(2020,4,24,20,9), dt.datetime(2020,4,24,20,16)]]
-	return hatpro_outliers_per_eye
-
-
-def import_MiRAC_outliers(filename):
-
-	"""
-	Import and convert manually (per eye) detected outliers of MiRAC-P 
-	to an array filled with datetime.
-
-	Parameters:
-	-----------
-	filename : str
-		Filename (including path) of the text file (.txt) that contains
-		the outliers.
-	"""
-
-	headersize = 1
-	file_handler = open(filename, 'r')
-	list_of_lines = list()
-
-	for line in file_handler:
-		current_line = line.strip().split('   ')	# split by 3 spaces
-		list_of_lines.append(current_line)
-
-	# delete header:
-	list_of_lines = list_of_lines[headersize:]
-	n_outliers = len(list_of_lines)			# number of outliers
-
-	# read start and end time of an outlier from a line:
-	list_outliers = []
-	for ix, line in enumerate(list_of_lines):
-		list_outliers.append([dt.datetime.strptime(line[0], "%Y %m %d %H %M"),
-							dt.datetime.strptime(line[1], "%Y %m %d %H %M")])
-
-	return list_outliers
 
 
 def sigmoid(x):
