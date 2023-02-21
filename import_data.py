@@ -1155,7 +1155,7 @@ def import_mirac_level1b_daterange(
 			continue
 
 		# list of v01 tb files with zenith scan:
-		file_nc = sorted(glob.glob(day_path + "*_mwr01_l1_tb_%s_*.nc"%vers))
+		file_nc = sorted(glob.glob(day_path + f"*_l1_tb_{vers}_*.nc"))
 
 		if len(file_nc) == 0:
 			if verbose >= 2:
@@ -1868,6 +1868,7 @@ def import_hatpro_level2a_daterange(
 	which_retrieval='both',
 	minute_avg=False,
 	vers='v01',
+	campaign='mosaic',
 	verbose=0):
 
 	"""
@@ -1894,6 +1895,8 @@ def import_hatpro_level2a_daterange(
 		data points are returned (more outliers, higher memory usage).
 	vers : str
 		Indicates the mwr_pro output version number. Valid options: 'i01', 'v00', and 'v01'. Default: 'v01'
+	campaign : str
+		Indicates which campaign is addressed. Options: 'mosaic', 'walsema'. Default: 'mosaic'
 	verbose : int
 		If 0, output is suppressed. If 1, basic output is printed. If 2, more output (more warnings,...)
 		is printed.
@@ -1936,7 +1939,10 @@ def import_hatpro_level2a_daterange(
 
 	# count the number of days between start and end date as max. array size:
 	n_days = (date_end - date_start).days + 1
-	n_ret = 86			# inquired from level 2a data, number of available elevation angles in retrieval
+	if campaign == 'mosaic':
+		n_ret = 86			# inquired from level 2a data, number of available elevation angles in retrieval
+	elif campaign == 'walsema':
+		n_ret = 2			# inquired from level 2a data, number of available elevation angles in retrieval
 
 	# basic variables that should always be imported:
 	mwr_time_keys = ['time', 'flag', 'lat', 'lon', 'zsl']				# keys with time as coordinate
@@ -2030,7 +2036,7 @@ def import_hatpro_level2a_daterange(
 					# mwr_master_dict[mwr_key][day_index:day_index + 1, :] = mwr_dict[mwr_key]			## for the case that we leave _err a daily value
 					mwr_master_dict[mwr_key][:] = mwr_dict[mwr_key]
 
-				elif len(mwr_dict[mwr_key]) == 1:
+				elif mwr_dict[mwr_key].size == 1:
 					mwr_master_dict[mwr_key][day_index:day_index + 1] = mwr_dict[mwr_key]
 
 				else:
@@ -2064,6 +2070,7 @@ def import_hatpro_level2b_daterange(
 	date_end,
 	which_retrieval='both',
 	vers='v01',
+	campaign='mosaic',
 	around_radiosondes=True,
 	path_radiosondes="",
 	s_version='level_2',
@@ -2091,6 +2098,8 @@ def import_hatpro_level2b_daterange(
 		temperature or the specific humidity profile. 'both' will load both. Default: 'both'
 	vers : str, optional
 		Indicates the mwr_pro output version number. Valid options: 'i01', 'v00', and 'v01'. Default: 'v01'
+	campaign : str
+		Indicates which campaign is addressed. Options: 'mosaic', 'walsema'. Default: 'mosaic'
 	around_radiosondes : bool, optional
 		If True, data will be limited to the time around radiosonde launches. If False, something else
 		(e.g. around 4 times a day) might be done. Default: True
@@ -2147,7 +2156,10 @@ def import_hatpro_level2b_daterange(
 	n_hgt = 43			# inquired from level 2b data, number of vertical retrieval levels (height levels)
 
 	# basic variables that should always be imported:
-	mwr_time_keys = ['time', 'flag', 'lat', 'lon', 'zsl']				# keys with time as coordinate
+	if campaign == 'mosaic':
+		mwr_time_keys = ['time', 'flag', 'lat', 'lon', 'zsl']				# keys with time as coordinate
+	else:
+		mwr_time_keys = ['time', 'flag']
 	mwr_height_keys = ['height']							# keys with height as coordinate
 
 	# Create an array that includes the radiosonde launch times:
@@ -2156,11 +2168,32 @@ def import_hatpro_level2b_daterange(
 			raise ValueError("If 'around_radiosondes' is True, the path to the radiosonde level 2 data ('pathradiosondes') " +
 								"must be given.")
 
-		if s_version != 'level_2':
+		if campaign == 'mosaic' and s_version != 'level_2':
 			raise ValueError("Radiosonde version 's_version' must be 'level_2' if around_radiosondes is True because " +
 								"for this version, the launch time is directly read from the filename. This has not " +
 								"been implemeted for other radiosonde versions ('mossonde', 'psYYMMDDwHH') because these " +
 								"are considered to be inferior.")
+
+		elif campaign == 'walsema':
+			add_files = sorted(glob.glob(path_radiosondes + "*.txt"))		# filenames only; filter path
+			
+			# load radiosonde data and identify launch time:
+			n_samp = len(add_files)		# number of radiosondes
+			sonde_dict_temp = import_radiosondes_PS131_txt(add_files)
+			launch_times = np.full((n_samp,), dt.datetime(1970,1,1))
+			kk = 0
+			for ii, a_f in enumerate(add_files):
+				ltt = dt.datetime.utcfromtimestamp(sonde_dict_temp[str(ii)]['launch_time'])
+				# only save those that are in the considered period
+				if ltt >= date_start and ltt < (date_end + dt.timedelta(days=1)):
+					launch_times[kk] = ltt
+					kk += 1
+			
+			# truncate launch_times and convert to sec since 1970-01-01 00:00:00 UTC:
+			launch_times = launch_times[:kk]
+			sample_times = datetime_to_epochtime(launch_times)
+			n_samp_tot = len(sample_times)
+
 		else:
 			add_files = sorted(glob.glob(path_radiosondes + "*.nc"))		# filenames only; filter path
 			add_files = [os.path.basename(a_f) for a_f in add_files]
@@ -2250,7 +2283,6 @@ def import_hatpro_level2b_daterange(
 
 		# list of v01 files:
 		hatpro_level2_nc = sorted(glob.glob(day_path + "*_%s_*.nc"%vers))
-
 		if len(hatpro_level2_nc) == 0:
 			if verbose >= 2:
 				warnings.warn("No netcdf files found for date %04i-%02i-%02i."%(yyyy,mm,dd))
@@ -2266,27 +2298,31 @@ def import_hatpro_level2b_daterange(
 				if (dataID + '_' in lvl2_nc) and ('BL00_' not in lvl2_nc):
 					hatpro_level2b_nc.append([lvl2_nc, dataID])
 
+
 		# load one retrieved variable after another from current day and save it into the mwr_master_dict
 		for lvl2_nc in hatpro_level2b_nc:
 			mwr_dict = import_hatpro_level2b(lvl2_nc[0], import_keys[lvl2_nc[1]])
 
 			# it may occur that the whole day is flagged. If so, skip this file:
-			if not np.any(mwr_dict['flag'] == 0):
-				n_samp_real = 0
-				continue
+			if campaign == 'mosaic':
 
-			# remove values where flag > 0:
-			for mthk in mwr_time_height_keys:
-				if mthk in lvl2_nc[1]:
-					mwr_dict[mthk] = mwr_dict[mthk][mwr_dict['flag'] == 0,:]
-			for mtkab in mwr_time_keys:
-				if mtkab != 'flag':
-					mwr_dict[mtkab] = mwr_dict[mtkab][mwr_dict['flag'] == 0]
-			mwr_dict['flag'] = mwr_dict['flag'][mwr_dict['flag'] == 0]
+				if not np.any(mwr_dict['flag'] == 0):
+					n_samp_real = 0
+					continue
 
-			# # # update the flag by taking the manually detected outliers into account:
-			# # # (not needed if v01 or later is used)
-			# mwr_dict['flag'] = outliers_per_eye(mwr_dict['flag'], mwr_dict['time'], instrument='hatpro')
+					# remove values where flag > 0:
+					for mthk in mwr_time_height_keys:
+						if mthk in lvl2_nc[1]:
+							mwr_dict[mthk] = mwr_dict[mthk][mwr_dict['flag'] == 0,:]
+					for mtkab in mwr_time_keys:
+						if mtkab != 'flag':
+							mwr_dict[mtkab] = mwr_dict[mtkab][mwr_dict['flag'] == 0]
+					mwr_dict['flag'] = mwr_dict['flag'][mwr_dict['flag'] == 0]
+
+					# # # update the flag by taking the manually detected outliers into account:
+					# # # (not needed if v01 or later is used)
+					# mwr_dict['flag'] = outliers_per_eye(mwr_dict['flag'], mwr_dict['time'], instrument='hatpro')
+
 
 			# find the time slice where the mwr time is closest to the sample_times.
 			# The identified index must be within 15 minutes, otherwise it will be discarded
@@ -2370,9 +2406,11 @@ def import_hatpro_level2c_daterange(
 	date_end,
 	which_retrieval='both',
 	vers='v01',
+	campaign='mosaic',
 	around_radiosondes=True,
 	path_radiosondes="",
 	s_version='level_2',
+	sample_time_tolerance=1800,
 	verbose=0):
 
 	"""
@@ -2397,6 +2435,8 @@ def import_hatpro_level2c_daterange(
 		boundary layer scan does not exist. Default: 'both'
 	vers : str
 		Indicates the mwr_pro output version number. Valid options: 'i01', 'v00', and 'v01'. Default: 'v01'
+	campaign : str
+		Indicates which campaign is addressed. Options: 'mosaic', 'walsema'. Default: 'mosaic'
 	around_radiosondes : bool, optional
 		If True, data will be limited to the time around radiosonde launches. If False, something else
 		(e.g. around 4 times a day) might be done. Default: True
@@ -2406,6 +2446,9 @@ def import_hatpro_level2c_daterange(
 		Specifies the radiosonde version that is to be imported. Must be 'level_2' to work properly.
 		Other versions have not been implemeted because they are considered to be inferior to level_2
 		radiosondes.
+	sample_time_tolerance : int
+		Integer indicating the sample time tolerance in seconds. This means that MWR time must be within
+		this +/- tolerance of a sample time (i.e., radiosonde launch time) to be accepted.
 	verbose : int
 		If 0, output is suppressed. If 1, basic output is printed. If 2, more output (more warnings,...)
 		is printed.
@@ -2448,7 +2491,10 @@ def import_hatpro_level2c_daterange(
 	n_hgt = 43			# inquired from level 2c data, number of vertical retrieval levels (height levels)
 
 	# basic variables that should always be imported:
-	mwr_time_keys = ['time', 'flag', 'lat', 'lon', 'zsl']				# keys with time as coordinate
+	if campaign == 'mosaic':
+		mwr_time_keys = ['time', 'flag', 'lat', 'lon', 'zsl']				# keys with time as coordinate
+	elif campaign == 'walsema':
+		mwr_time_keys = ['time', 'flag']
 	mwr_height_keys = ['height']						# keys with height as coordinate
 
 	# Create an array that includes the radiosonde launch times:
@@ -2457,11 +2503,32 @@ def import_hatpro_level2c_daterange(
 			raise ValueError("If 'around_radiosondes' is True, the path to the radiosonde level 2 data ('pathradiosondes') " +
 								"must be given.")
 
-		if s_version != 'level_2':
+		if campaign == 'mosaic' and s_version != 'level_2':
 			raise ValueError("Radiosonde version 's_version' must be 'level_2' if around_radiosondes is True because " +
 								"for this version, the launch time is directly read from the filename. This has not " +
 								"been implemeted for other radiosonde versions ('mossonde', 'psYYMMDDwHH') because these " +
 								"are considered to be inferior.")
+
+		elif campaign == 'walsema':
+			add_files = sorted(glob.glob(path_radiosondes + "*.txt"))		# filenames only; filter path
+			
+			# load radiosonde data and identify launch time:
+			n_samp = len(add_files)		# number of radiosondes
+			sonde_dict_temp = import_radiosondes_PS131_txt(add_files)
+			launch_times = np.full((n_samp,), dt.datetime(1970,1,1))
+			kk = 0
+			for ii, a_f in enumerate(add_files):
+				ltt = dt.datetime.utcfromtimestamp(sonde_dict_temp[str(ii)]['launch_time'])
+				# only save those that are in the considered period
+				if ltt >= date_start and ltt < (date_end + dt.timedelta(days=1)):
+					launch_times[kk] = ltt
+					kk += 1
+			
+			# truncate launch_times and convert to sec since 1970-01-01 00:00:00 UTC:
+			launch_times = launch_times[:kk]
+			sample_times = datetime_to_epochtime(launch_times)
+			n_samp_tot = len(sample_times)
+
 		else:
 			add_files = sorted(glob.glob(path_radiosondes + "*.nc"))		# filenames only; filter path
 			add_files = [os.path.basename(a_f) for a_f in add_files]
@@ -2513,8 +2580,7 @@ def import_hatpro_level2c_daterange(
 	time_index = 0	# this index (for lvl 2c) will be increased by the length of the time
 						# series of the current day (now_date) to fill the mwr_master_dict time axis
 						# accordingly.
-	sample_time_tolerance = 1800		# sample time tolerance in seconds: mwr time must be within this
-										# +/- tolerance of a sample_time to be accepted
+	
 	for now_date in (date_start + dt.timedelta(days=n) for n in range(n_days)):
 
 		if verbose >= 1: print("Working on HATPRO Level 2c, ", now_date)
@@ -2562,22 +2628,23 @@ def import_hatpro_level2c_daterange(
 		for lvl2_nc in hatpro_level2c_nc:
 			mwr_dict = import_hatpro_level2c(lvl2_nc[0], import_keys[lvl2_nc[1]])
 
-			# it may occur that the whole day is flagged. If so, skip this file:
-			if not np.any(mwr_dict['flag'] == 0):
-				n_samp_real = 0
-				continue
+			if campaign == 'mosaic':
+				# it may occur that the whole day is flagged. If so, skip this file:
+				if not np.any(mwr_dict['flag'] == 0):
+					n_samp_real = 0
+					continue
 
-			# remove values where flag > 0:
-			for mthk in mwr_time_height_keys: mwr_dict[mthk] = mwr_dict[mthk][mwr_dict['flag'] == 0,:]
-			for mtkab in mwr_time_keys:
-				if mtkab != 'flag':
-					mwr_dict[mtkab] = mwr_dict[mtkab][mwr_dict['flag'] == 0]
-			mwr_dict['flag'] = mwr_dict['flag'][mwr_dict['flag'] == 0]
+				# remove values where flag > 0:
+				for mthk in mwr_time_height_keys: mwr_dict[mthk] = mwr_dict[mthk][mwr_dict['flag'] == 0,:]
+				for mtkab in mwr_time_keys:
+					if mtkab != 'flag':
+						mwr_dict[mtkab] = mwr_dict[mtkab][mwr_dict['flag'] == 0]
+				mwr_dict['flag'] = mwr_dict['flag'][mwr_dict['flag'] == 0]
 
+				# # # update the flag by taking the manually detected outliers into account:
+				# # # (not needed if v01 or later is used)
+				# mwr_dict['flag'] = outliers_per_eye(mwr_dict['flag'], mwr_dict['time'], instrument='hatpro')
 
-			# # # update the flag by taking the manually detected outliers into account:
-			# # # (not needed if v01 or later is used)
-			# mwr_dict['flag'] = outliers_per_eye(mwr_dict['flag'], mwr_dict['time'], instrument='hatpro')
 
 			# find the time slice where the mwr time is closest to the sample_times.
 			# The identified index must be within 30 minutes, otherwise it will be discarded.
@@ -2606,7 +2673,6 @@ def import_hatpro_level2c_daterange(
 					continue
 
 				elif mwr_key in mwr_time_height_keys:
-					# first: filter for non-flagged values
 					mwr_master_dict[mwr_key][time_index:time_index + n_samp_real,:] = mwr_dict[mwr_key][sample_idx,:]
 
 				else:
@@ -3326,6 +3392,206 @@ def import_hatpro_level2c_daterange_pangaea(
 	return mwr_master_dict
 
 
+def import_hatpro_level2a_daterange_xarray(
+	path_data,
+	date_start,
+	date_end,
+	which_retrieval='both'):
+
+	"""
+	Imports all HATPRO level 2a data (IWV, LWP) between a start and an end date. The data will be returned
+	in an xarray dataset.
+
+	Parameters:
+	-----------
+	path_data : str
+		Path of level 2a data. All files must lie in this folder.
+	date_start : str
+		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_end : str
+		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	which_retrieval : str, optional
+		This describes which variable(s) will be loaded. Options: 'iwv' or 'prw' will load the
+		integrated water vapour. 'lwp' or 'clwvi' will load the liquid water path. 'both' will 
+		load both. Default: 'both'
+	"""
+
+	def remove_vars(DS):
+
+		"""
+		Remove unnecessary variables from the dataset.
+		"""
+
+		unwanted_vars = ['time_bnds', 'azi', 'ele', 'ele_ret', 'prw_offset', 'prw_off_zenith', 'prw_off_zenith_offset',
+						'clwvi_offset', 'clwvi_off_zenith', 'clwvi_off_zenith_offset']
+
+		for var in unwanted_vars:
+			if var in DS.data_vars:
+				DS = DS.drop_vars(var)
+
+		return DS
+
+	# check if the input of the retrieval variable is okay:
+	if not isinstance(which_retrieval, str):
+			raise TypeError("Argument 'which_retrieval' must be a string. Options: 'iwv' or 'prw' will load the " +
+				"integrated water vapour. 'lwp' or 'clwvi' will load the liquid water path. " +
+				"'both' will load both. Default: 'both'")
+
+	else:
+		if which_retrieval not in ['prw', 'iwv', 'clwvi', 'lwp', 'both']:
+			raise ValueError("Argument 'which_retrieval' must be one of the following options: 'iwv' or 'prw' will load the " +
+				"integrated water vapour. 'lwp' or 'clwvi' will load the liquid water path. " +
+				"'both' will load both. Default: 'both'")
+
+		else:
+				if which_retrieval == 'iwv':
+					which_retrieval = ['prw']
+				elif which_retrieval == 'lwp':
+					which_retrieval = ['clwvi']
+				elif which_retrieval == 'both':
+					which_retrieval = ['prw', 'clwvi']
+				else:
+					raise ValueError("Argument '" + which_retrieval + "' not recognised. Please use one of the following options: " +
+						"'iwv' or 'prw' will load the " +
+						"integrated water vapour. 'lwp' or 'clwvi' will load the liquid water path. " +
+						"'both' will load both. Default: 'both'")
+					
+
+	# extract day, month and year from start date:
+	date_start_dt = dt.datetime.strptime(date_start, "%Y-%m-%d")
+	date_end_dt = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+	interesting_vars = ['time', 'flag', 'lat', 'lon', 'zsl']	# base of interesting vars to be kept in the dataset
+	sub_str = "_v01_"				# substring to identify the date printed in the filenames
+	l_sub_str = len(sub_str)
+
+	# Import all files for the respective variable in the date range:
+	if 'prw' in which_retrieval:
+		files = sorted(glob.glob(path_data + "ioppol_tro_mwr00_l2_prw_v01_*.nc"))
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date >= date_start_dt and file_date <= date_end_dt:
+				files_filtered.append(file)
+
+		DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested', preprocess=remove_vars)
+
+		# 'repair' some variables:
+		DS['flag'][np.isnan(DS['flag'])] = 0.
+		DS['time'] = np.rint(DS['time']).astype(float).astype('datetime64[s]')
+
+
+	if 'clwvi' in which_retrieval:
+		raise RuntimeError("You have entered a construction site. Please leave immediately. Eltern haften für ihre Kinder.")
+
+			# files = sorted(glob.glob(path_data + "ioppol_tro_mwr00_l2_clwvi_v01_*.nc"))
+
+			# # run through list: identify where date is written and check if within date range:
+			# files_filtered = list()
+			# for file in files:
+				# ww = file.find(sub_str) + l_sub_str
+				# file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+				# if file_date >= date_start_dt and file_date <= date_end_dt:
+					# files_filtered.append(file)
+
+
+			# # load data:
+			# DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested')
+			# if mwr_dict:
+				# interesting_vars = ['flag', 'clwvi', 'clwvi_offset', 'clwvi_err']
+				# for vava in interesting_vars:
+					# if vava != 'clwvi_err':
+						# mwr_dict[vava] = DS[vava].values.astype(np.float64)
+					# else:
+						# mwr_dict[vava] = DS[vava][0,:].values.astype(np.float64)
+				# mwr_dict['flag'][np.isnan(mwr_dict['flag'])] = 0.
+
+			# else:
+				# interesting_vars = ['time', 'flag', 'lat', 'lon', 'zsl', 'clwvi', 'clwvi_offset', 'clwvi_err']
+				# for vava in interesting_vars:
+					# if vava != 'clwvi_err':
+						# mwr_dict[vava] = DS[vava].values.astype(np.float64)
+					# else:
+						# mwr_dict[vava] = DS[vava][0,:].values.astype(np.float64)
+				# mwr_dict['flag'][np.isnan(mwr_dict['flag'])] = 0.
+				# mwr_dict['time'] = np.rint(mwr_dict['time']).astype(float)
+			# DS.close()
+
+	return DS
+
+
+def import_mirac_level1b_daterange_pangaea(
+	path_data,
+	date_start,
+	date_end):
+
+	"""
+	Runs through all days between a start and an end date. It concats the level 1b TB time
+	series of each day so that you'll have one dictionary, whose 'TB' will contain the IWV
+	for the entire date range period.
+
+	Parameters:
+	-----------
+	path_data : str
+		Base path of level 1 data. This directory contains subfolders representing the year, which,
+		in turn, contain months, which contain day subfolders. Example path_data:
+		"/data/obs/campaigns/mosaic/mirac-p/l1/"
+	date_start : str
+		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_end : str
+		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	"""
+
+	def cut_vars(DS):
+		DS = DS.drop_vars(['freq_sb', 'freq_shift', 'tb_absolute_accuracy', 'tb_cov'])
+		return DS
+
+
+	# extract day, month and year from start date:
+	date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+	date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+
+	# Identify files in the date range: First, load all into a list, then check which ones 
+	# suit the daterange:
+	mwr_dict = dict()
+	sub_str = "_v01_"
+	l_sub_str = len(sub_str)
+	files = sorted(glob.glob(path_data + "MOSAiC_uoc_lhumpro-243-340_l1_tb_v01_*.nc"))
+
+	# run through list: identify where date is written and check if within date range:
+	files_filtered = list()
+	for file in files:
+		ww = file.find(sub_str) + l_sub_str
+		file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+		if file_date >= date_start and file_date <= date_end:
+			files_filtered.append(file)
+
+
+	# load data:
+	DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested', preprocess=cut_vars)
+	interesting_vars = ['time', 'flag', 'ta', 'pa', 'hur', 'tb', 'tb_bias_estimate', 'freq_sb', 'freq_shift',
+						'tb_absolute_accuracy', 'tb_cov']
+	for vava in interesting_vars:
+		if vava not in ['freq_sb', 'freq_shift', 'tb_absolute_accuracy', 'tb_cov']:
+			mwr_dict[vava] = DS[vava].values.astype(np.float64)
+	mwr_dict['flag'][np.isnan(mwr_dict['flag'])] = 0.
+	mwr_dict['time'] = np.rint(mwr_dict['time']).astype(float)
+	DS.close()
+	DS = xr.open_dataset(files_filtered[0], decode_times=False)
+	mwr_dict['freq_sb'] = DS.freq_sb.values.astype(np.float32)
+	mwr_dict['freq_shift'] = DS.freq_shift.values.astype(np.float32)
+	mwr_dict['tb_absolute_accuracy'] = DS.tb_absolute_accuracy.values.astype(np.float32)
+	mwr_dict['tb_cov'] = DS.tb_cov.values.astype(np.float32)
+
+	DS.close()
+
+	return mwr_dict
+
+
 def import_mirac_level2a_daterange_pangaea(
 	path_data,
 	date_start,
@@ -3396,6 +3662,88 @@ def import_mirac_level2a_daterange_pangaea(
 	DS.close()
 
 	return mwr_dict
+
+
+def import_mirac_level2a_daterange_xarray(
+	path_data,
+	date_start,
+	date_end,
+	which_retrieval='both'):
+
+	"""
+	Imports all MiRAC-P level 2a data (IWV) between a start and an end date. The data will be returned
+	in an xarray dataset.
+
+	Parameters:
+	-----------
+	path_data : str
+		Path of level 2a data. All files must be in this folder.
+	date_start : str
+		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_end : str
+		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	which_retrieval : str, optional
+		This describes which variable(s) will be loaded. Options: 'iwv' or 'prw' will load the
+		integrated water vapour. 'both' will also load integrated water vapour only. Default: 'both'
+	"""
+
+	def remove_vars(DS):
+
+		"""
+		Remove unnecessary variables from the dataset.
+		"""
+
+		unwanted_vars = ['time_bnds', 'azi', 'ele', 'ele_ret', 'prw_offset', 'prw_off_zenith', 'prw_off_zenith_offset']
+
+		for var in unwanted_vars:
+			if var in DS.data_vars:
+				DS = DS.drop_vars(var)
+
+		return DS
+
+	# check if the input of the retrieval variable is okay:
+	if not isinstance(which_retrieval, str):
+			raise TypeError("Argument 'which_retrieval' must be a string. Options: 'iwv' or 'prw' will load the " +
+				"integrated water vapour. 'both' will also load integrated water vapour only. Default: 'both'")
+
+	else:
+		if which_retrieval not in ['prw', 'iwv', 'both']:
+			raise ValueError("Argument 'which_retrieval' must be one of the following options: 'iwv' or 'prw' will load the " +
+				"integrated water vapour. 'both' will also load integrated water vapour only. Default: 'both'")
+
+		else:
+				if which_retrieval == 'iwv':
+					which_retrieval = ['prw']
+				elif which_retrieval == 'both':
+					which_retrieval = ['prw']
+					
+
+	# extract day, month and year from start date:
+	date_start_dt = dt.datetime.strptime(date_start, "%Y-%m-%d")
+	date_end_dt = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+	interesting_vars = ['time', 'flag', 'lat', 'lon', 'zsl']	# base of interesting vars to be kept in the dataset
+	sub_str = "_v01_"				# substring to identify the date printed in the filenames
+	l_sub_str = len(sub_str)
+
+	# Import all files for the respective variable in the date range:
+	files = sorted(glob.glob(path_data + "MOSAiC_uoc_lhumpro-243-340_l2_prw_v01_*.nc"))
+
+	# run through list: identify where date is written and check if within date range:
+	files_filtered = list()
+	for file in files:
+		ww = file.find(sub_str) + l_sub_str
+		file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+		if file_date >= date_start_dt and file_date <= date_end_dt:
+			files_filtered.append(file)
+
+	DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested', preprocess=remove_vars)
+
+	# 'repair' some variables:
+	DS['flag'][np.isnan(DS['flag'])] = 0.
+	DS['time'] = np.rint(DS['time']).astype(float).astype('datetime64[s]')
+
+	return DS
 
 
 def import_single_mossonde_curM1(
@@ -3794,6 +4142,36 @@ def import_radiosonde_daterange(
 		If 0, output is suppressed. If 1, basic output is printed. If 2, more output (more warnings,...)
 		is printed.
 	"""
+
+	def time_prematurely_bursted_sondes():
+
+		"""
+		This little function merely returns time stamps of MOSAiC radiosondes, whose
+		burst altitude was <= 10000 m.
+		"""
+
+		failed_sondes_dt = np.array([dt.datetime(2019, 10, 7, 11, 0),
+							dt.datetime(2019, 10, 15, 23, 0),
+							dt.datetime(2019, 11, 4, 11, 0),
+							dt.datetime(2019, 11, 17, 17, 0),
+							dt.datetime(2019, 12, 17, 5, 0),
+							dt.datetime(2019, 12, 24, 11, 0),
+							dt.datetime(2020, 1, 13, 11, 0),
+							dt.datetime(2020, 2, 1, 11, 0),
+							dt.datetime(2020, 2, 6, 23, 0),
+							dt.datetime(2020, 3, 9, 23, 0),
+							dt.datetime(2020, 3, 11, 17, 0),
+							dt.datetime(2020, 3, 29, 5, 0),
+							dt.datetime(2020, 5, 14, 17, 0),
+							dt.datetime(2020, 6, 14, 17, 0),
+							dt.datetime(2020, 6, 19, 11, 0),
+							dt.datetime(2020, 9, 27, 9, 0)])
+
+		reftime = dt.datetime(1970,1,1)
+		failed_sondes_t = np.asarray([datetime_to_epochtime(fst) for fst in failed_sondes_dt])
+		failed_sondes_t = np.asarray([(fst - reftime).total_seconds() for fst in failed_sondes_dt])
+		
+		return failed_sondes_t, failed_sondes_dt
 
 	if not isinstance(s_version, str): raise TypeError("s_version in import_radiosonde_daterange must be a string.")
 
@@ -4694,9 +5072,109 @@ def import_MOSAiC_Radiosondes_PS122_Level2_tab(filename):
 	return rs_dict, attribute_info
 
 
+def import_radiosondes_PS131_txt(
+	files,
+	add_info=False):
+
+	"""
+	Imports radiosonde data gathered during PS131 from Polarstern during the ATWAICE
+	campaign. The Integrated Water Vapour will be computed using the saturation 
+	water vapour pressure according to Hyland and Wexler 1983. Measurements will be
+	given in SI units.
+	The radiosonde data will be stored in a dict with keys being the sonde index and
+	the values are 1D arrays with shape (n_data_per_sonde,).
+
+	Parameters:
+	-----------
+	files : str
+		List of filename + path of the Polarstern PS131 radiosonde data (.tab) taken 
+		directly from the ship.
+	add_info : bool
+		If True, auxiliary information is added to the returned dictionary 
+		(i.e., operator of radiosonde, max altitude before burst).
+	"""
+
+	n_sondes = len(files)		# just a preliminary assumption of the amount of radiosondes
+	n_data_per_sonde = 12000	# assumption of max. time (data) points per sonde
+	reftime = dt.datetime(1970,1,1)
+	# the radiosonde dict will be structured as follows:
+	# rs_dict['0'] contains all data from the first radiosonde: rs_dict['0']['temp'] contains temperature
+	# rs_dict['1'] : second radiosonde, ...
+	# this structure allows to have different time dimensions for each radiosonde
+	rs_dict = dict()
+	for k in range(n_sondes):
+		rs_dict[str(k)] = {'height': np.full((n_data_per_sonde,), np.nan),		# in m
+							'pres': np.full((n_data_per_sonde,), np.nan),		# in Pa
+							'temp': np.full((n_data_per_sonde,), np.nan),		# in K
+							'relhum': np.full((n_data_per_sonde,), np.nan),		# in [0,1]
+							'wdir': np.full((n_data_per_sonde,), np.nan),		# in deg
+							'wspeed': np.full((n_data_per_sonde,), np.nan)}		# in m s^-1
+
+	# loop over files:
+	for kk, file in enumerate(files):
+		f_handler = open(file, 'r')
+		s_idx = str(kk)
+
+		mm = 0		# runs though all data points of one radiosonde and is reset to 0 for each new radiosonde
+		headersize = 16
+		for k, line in enumerate(f_handler):
+			if k < headersize:		# to extract launch time
+				lt_idx = line.find("DATE/TIME START: ")
+				if lt_idx != -1:
+					rs_dict[s_idx]['launch_time_npdt'] = np.datetime64(line[lt_idx+len("DATE_TIME START: "):lt_idx+len("DATE_TIME START: ")+19])
+					rs_dict[s_idx]['launch_time'] = rs_dict[s_idx]['launch_time_npdt'].astype(np.float64)	# in sec since 1970-01-01 00:00:00
+
+				if add_info:
+					op_idx = line.find("Operator: ")			# person who launched the sonde
+					ma_idx = line.find("MAXIMUM ALTITUDE: ")	# altitude where the balloon burst
+					if op_idx != -1:
+						rs_dict[s_idx]['op'] = line[op_idx+len("Operator: "):line.find("\n")]
+
+					if ma_idx != -1:
+						rs_dict[s_idx]['max_alt'] = int(line[ma_idx+len("MAXIMUM ALTITUDE: "):line.find("\n")-1])
+
+			else:		# skip header
+				current_line = line.strip().split("\t")		# split by tabs
+
+				# extract data:
+				try:
+					rs_dict[s_idx]['height'][mm] = float(current_line[0])
+					rs_dict[s_idx]['pres'][mm] = float(current_line[1])*100.0
+					rs_dict[s_idx]['temp'][mm] = float(current_line[2]) + 273.15
+					rs_dict[s_idx]['relhum'][mm] = float(current_line[3])*0.01
+					rs_dict[s_idx]['wdir'][mm] = float(current_line[4])
+					rs_dict[s_idx]['wspeed'][mm] = float(current_line[5])
+
+				except ValueError:		# then at least one measurement is missing:
+					for ix, cr in enumerate(current_line):
+						if cr == '':
+							current_line[ix] = 'nan'
+					rs_dict[s_idx]['height'][mm] = float(current_line[0])
+					rs_dict[s_idx]['pres'][mm] = float(current_line[1])*100.0
+					rs_dict[s_idx]['temp'][mm] = float(current_line[2]) + 273.15
+					rs_dict[s_idx]['relhum'][mm] = float(current_line[3])*0.01
+					rs_dict[s_idx]['wdir'][mm] = float(current_line[4])
+					rs_dict[s_idx]['wspeed'][mm] = float(current_line[5])
+
+				mm += 1
+
+		# finally truncate unneeded data lines and compute specific humidity and IWV:
+		last_nonnan = np.array([np.where(~np.isnan(rs_dict[s_idx][key]))[0][-1] + 1 for key in rs_dict[s_idx].keys() if key not in ['launch_time', 'launch_time_npdt', 'max_alt', 'op']]).min()
+		for key in rs_dict[s_idx].keys(): 
+			if key not in ['launch_time', 'launch_time_npdt', 'op', 'max_alt']:
+				rs_dict[s_idx][key] = rs_dict[s_idx][key][:last_nonnan]
+		rs_dict[s_idx]['q'] = convert_rh_to_spechum(rs_dict[s_idx]['temp'], rs_dict[s_idx]['pres'], 
+													rs_dict[s_idx]['relhum'])
+
+		rs_dict[s_idx]['IWV'] = compute_IWV_q(rs_dict[s_idx]['q'], rs_dict[s_idx]['pres'])
+	
+	return rs_dict
+
+
 def import_PS_mastertrack(
 	filename,
-	keys='all'):
+	keys='all',
+	return_DS=False):
 
 	"""
 	Imports Polarstern master track data during MOSAiC published on PANGAEA. Time
@@ -4706,28 +5184,36 @@ def import_PS_mastertrack(
 
 	Parameters:
 	-----------
-	filename : str
+	filename : str or list of str
 		Filename + path of the Polarstern Track data (.nc).
 	keys : list of str
 		List of names of variables to be imported. 'all' will import all keys.
 		Default: 'all'
+	return_DS : bool
+		If True, an xarray dataset will be returned (only if type(filename) == list).
 	"""
 
-	file_nc = nc.Dataset(filename)
+	if type(filename) == list:
+		DS = xr.open_mfdataset(filename, combine='nested', concat_dim='time')
+		return DS
 
-	if keys == 'all':
-		keys = file_nc.variables.keys()
+	else:
 
-	elif isinstance(keys, str) and (keys != 'all'):
-		raise ValueError("Argument 'keys' must either be a string ('all') or a list of variable names.")
+		file_nc = nc.Dataset(filename)
 
-	ps_track_dict = dict()
-	for key in keys:
-		if not key in file_nc.variables.keys():
-			raise KeyError("I have no memory of this key: '%s'. Key not found in file '%s'." %(key, filename))
-		ps_track_dict[key] = np.asarray(file_nc.variables[key])
+		if keys == 'all':
+			keys = file_nc.variables.keys()
 
-	return ps_track_dict
+		elif isinstance(keys, str) and (keys != 'all'):
+			raise ValueError("Argument 'keys' must either be a string ('all') or a list of variable names.")
+
+		ps_track_dict = dict()
+		for key in keys:
+			if not key in file_nc.variables.keys():
+				raise KeyError("I have no memory of this key: '%s'. Key not found in file '%s'." %(key, filename))
+			ps_track_dict[key] = np.asarray(file_nc.variables[key])
+
+		return ps_track_dict
 
 
 def import_cloudnet_product(
@@ -5047,6 +5533,40 @@ def import_mwr_pro_radiosondes(
 		sonde_dict['lwp'] = DS.liquid_water_path.values			# in kg m^-2
 
 	return sonde_dict
+
+
+def import_MiRAC_outliers(filename):
+
+	"""
+	Import and convert manually (per eye) detected outliers of MiRAC-P 
+	to an array filled with datetime.
+
+	Parameters:
+	-----------
+	filename : str
+		Filename (including path) of the text file (.txt) that contains
+		the outliers.
+	"""
+
+	headersize = 1
+	file_handler = open(filename, 'r')
+	list_of_lines = list()
+
+	for line in file_handler:
+		current_line = line.strip().split('   ')	# split by 3 spaces
+		list_of_lines.append(current_line)
+
+	# delete header:
+	list_of_lines = list_of_lines[headersize:]
+	n_outliers = len(list_of_lines)			# number of outliers
+
+	# read start and end time of an outlier from a line:
+	list_outliers = []
+	for ix, line in enumerate(list_of_lines):
+		list_outliers.append([dt.datetime.strptime(line[0], "%Y %m %d %H %M"),
+							dt.datetime.strptime(line[1], "%Y %m %d %H %M")])
+
+	return list_outliers
 
 
 def import_mirac_MET(
@@ -5427,3 +5947,311 @@ def import_mirac_temp(
 				mwr_master_dict[mwr_key] = mwr_master_dict[mwr_key][:last_time_step+1]
 
 	return mwr_master_dict
+
+
+def import_DSHIP(
+	file,
+	vars=['date time', 'SYS.STR.Course', 'SYS.STR.HDG', 'SYS.STR.PosAlt', 
+			'SYS.STR.PosLat', 'SYS.STR.PosLon', 'SYS.STR.Speed', 
+			'NACOS.RAOSD.system_heading']):
+
+	"""
+	Imports DSHIP data (from .dat file) into a dictionary where the key indicates the variable name
+	and the value equals the time series (1D array).
+
+	Parameters:
+	-----------
+	file : str
+		Path and filename of the DSHIP file.
+	 vars : list
+		List of variables to import. Please check the DSHIP file header manually.
+		Importing all variables consumes about 10 GB of memory.
+	"""
+
+	data_dict = dict()				######### maybe as xarray?
+	for var_name in vars: data_dict[var_name] = []		# empty strings
+
+	# open and read first line to extract var names:
+	with open(file, 'r', encoding='utf-8', errors='ignore') as f_handler:
+
+		for k, line in enumerate(f_handler):
+
+			if k == 0:	# first line: variable names:
+				var_names = line.split("\t")
+
+			elif k == 1: 
+				continue
+
+			elif k == 2:
+				units = line.split("\t")		# but corrupted due to utf-8 decoding errors ignored
+
+			else:
+				data_list = line.split("\t")
+
+				# leave it all as string for now and convert later:
+				for var_name, data in zip(var_names, data_list):
+					if var_name in vars:
+						data_dict[var_name].append(data)
+
+
+	# convert data variables to something useful:
+	for var_name in var_names:
+		if var_name in vars:
+			if var_name in ['date time']:
+				data_dict[var_name] = [ddd.replace("/", "-") for ddd in data_dict[var_name]]
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype="datetime64[s]")
+
+			elif var_name in ['SYS.STR.Course', 'SYS.STR.HDG', 'SYS.STR.Speed', 'NACOS.RAOSD.system_heading']:
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype=np.float32)
+
+			elif var_name in ['SYS.STR.PosAlt']:
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype=np.int16)
+
+			elif var_name in ['SYS.STR.PosLat', 'SYS.STR.PosLon']:
+				for k, dat in enumerate(data_dict[var_name]):
+					dat = dat.split(" ")
+
+					if len(dat) != 3: 		# missing data
+						dec_deg = np.nan
+
+					else:
+						deg, dec_min, sign = float(dat[0]), float(dat[1][:-1]), dat[2]
+
+						# convert from degrees decimal minutes to decimal degrees:
+						dec_deg = deg + dec_min / 60.0
+						if sign in ["S", "W"]:
+							dec_deg = -1.0*dec_deg
+
+					data_dict[var_name][k] = str(dec_deg)
+
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype=np.float32)
+
+	return data_dict
+
+
+def import_DSHIP_csv(
+	file,
+	vars=['date time', 'SYS.STR.Course', 'SYS.STR.HDG', 'SYS.STR.PosLat', 
+			'SYS.STR.PosLon', 'SYS.STR.Speed']):
+
+	"""
+	Imports DSHIP data (from .csv file) into a dictionary where the key indicates the variable name
+	and the value equals the time series (1D array).
+
+	Parameters:
+	-----------
+	file : str
+		Path and filename of the DSHIP file.
+	 vars : list
+		List of variables to import. Please check the DSHIP file header manually.
+		Importing all variables consumes about 10 GB of memory.
+	"""
+
+	data_dict = dict()				######### maybe as xarray?
+	for var_name in vars: data_dict[var_name] = []		# empty strings
+
+	# open the csv and read it:
+	with open(file, newline='') as csvfile:
+		csv_reader = csv.reader(csvfile, dialect='excel', delimiter=',')
+		list_of_lines = list()
+		for row in csv_reader:
+			list_of_lines.append(row)
+
+	# loop through all lines to extract data and meta data:
+	var_names = list()
+	units = list()
+	for k, line in enumerate(list_of_lines):
+
+		if k == 0:		# first line: variable names:
+			var_names = line
+
+		elif k == 1:
+			continue
+
+		elif k == 2:	# units
+			units = line
+
+		else:
+			data_list = line
+
+			# leave data as string for now and convert later:
+			for var_name, data in zip(var_names, data_list):
+				if var_name in vars:
+					data_dict[var_name].append(data)
+
+
+	# convert data variables to something useful:
+	for var_name in var_names:
+		if var_name in vars:
+			if var_name in ['date time']:
+				data_dict[var_name] = [ddd.replace("/", "-") for ddd in data_dict[var_name]]
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype="datetime64[s]")
+
+			elif var_name in ['SYS.STR.Course', 'SYS.STR.HDG', 'SYS.STR.Speed', 'NACOS.RAOSD.system_heading']:
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype=np.float32)
+
+			elif var_name in ['SYS.STR.PosAlt']:
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype=np.int16)
+
+			elif var_name in ['SYS.STR.PosLat', 'SYS.STR.PosLon']:
+				for k, dat in enumerate(data_dict[var_name]):
+					dat = dat.split(" ")
+
+					if len(dat) != 3: 		# missing data
+						dec_deg = np.nan
+
+					else:
+						# eventually, dat[0] contains a degree symbol: replace it
+						deg_utf8 = b"\xc2\xb0"
+						if deg_utf8 in dat[0].encode('utf-8'): 
+							dat[0] = dat[0].replace("°", "")
+						deg, dec_min, sign = float(dat[0]), float(dat[1][:-1]), dat[2]
+
+						# convert from degrees decimal minutes to decimal degrees:
+						dec_deg = deg + dec_min / 60.0
+						if sign in ["S", "W"]:
+							dec_deg = -1.0*dec_deg
+
+					data_dict[var_name][k] = str(dec_deg)
+
+				data_dict[var_name] = np.asarray(data_dict[var_name], dtype=np.float32)
+
+	return data_dict
+
+
+def import_iasi_nc(
+	files):
+
+	"""
+	Import IASI file(s) and return as xarray dataset. Also cuts irrelevant variables and
+	dimensions. Also the time needs to be decoded manually.
+
+	Parameters:
+	-----------
+	files : list of str
+		Path + filenames of the netCDF files to be imported. 
+	"""
+
+	def cut_vars(DS):
+
+		unwanted_vars = ['forli_layer_heights_co', 'forli_layer_heights_hno3', 'forli_layer_heights_o3', 'brescia_altitudes_so2', 'solar_zenith', 
+					'satellite_zenith', 'solar_azimuth', 'satellite_azimuth', 'fg_atmospheric_ozone', 'fg_qi_atmospheric_ozone', 'atmospheric_ozone', 
+					'integrated_ozone', 'integrated_n2o', 'integrated_co', 'integrated_ch4', 'integrated_co2', 'surface_emissivity', 
+					'number_cloud_formations', 'fractional_cloud_cover', 'cloud_top_temperature', 'cloud_top_pressure', 'cloud_phase', 
+					'instrument_mode', 'spacecraft_altitude', 'flag_cdlfrm', 'flag_cldnes', 'flag_cdltst', 'flag_daynit', 'flag_dustcld', 
+					'flag_numit', 'flag_nwpbad', 'flag_physcheck', 'flag_satman', 'flag_sunglnt', 'flag_thicir', 'nerr_values', 'error_data_index', 
+					'temperature_error', 'water_vapour_error', 'ozone_error', 'co_qflag', 'co_bdiv', 'co_npca', 'co_nfitlayers', 'co_nbr_values', 
+					'co_cp_air', 'co_cp_co_a', 'co_x_co', 'co_h_eigenvalues', 'co_h_eigenvectors', 'hno3_qflag', 'hno3_bdiv', 'hno3_npca', 
+					'hno3_nfitlayers', 'hno3_nbr_values', 'hno3_cp_air', 'hno3_cp_hno3_a', 'hno3_x_hno3', 'hno3_h_eigenvalues', 'hno3_h_eigenvectors',
+					'o3_qflag', 'o3_bdiv', 'o3_npca', 'o3_nfitlayers', 'o3_nbr_values', 'o3_cp_air', 'o3_cp_o3_a', 'o3_x_o3', 'o3_h_eigenvalues', 
+					'o3_h_eigenvectors', 'so2_qflag', 'so2_col_at_altitudes', 'so2_altitudes', 'so2_col', 'so2_bt_difference', 'fg_surface_temperature',
+					'fg_qi_surface_temperature', 'surface_temperature']
+		remaining_unwanted_dims = ['cloud_formations', 'nlo', 'new']
+
+		DS = DS.drop_vars(unwanted_vars)
+		DS = DS.drop_dims(remaining_unwanted_dims)
+		return DS
+
+	DS = xr.open_mfdataset(files, combine='nested', concat_dim='along_track', preprocess=cut_vars, decode_times=False)
+
+	# decode time:
+	reftime = np.datetime64("2000-01-01T00:00:00").astype('float32')	# in sec since 1970-01-01 00:00:00 UTC
+	record_start_time_npdt = (DS.record_start_time.values + reftime).astype('datetime64[s]')
+	record_stop_time_npdt = (DS.record_stop_time.values + reftime).astype('datetime64[s]')
+	DS['record_start_time'] = xr.DataArray(record_start_time_npdt, dims=['along_track'], attrs={'long_name': "Record start time", 
+											'units': "seconds since 1970-01-01 00:00:00 UTC"})
+	DS['record_stop_time'] = xr.DataArray(record_stop_time_npdt, dims=['along_track'], attrs={'long_name': "Record stop time", 
+											'units': "seconds since 1970-01-01 00:00:00 UTC"})
+
+	# also rename integrated water vapour variable:
+	DS = DS.rename({'integrated_water_vapor': 'iwv'})
+
+	return DS
+
+
+def import_iasi_step1(
+	path_data):
+
+	"""
+	Imports IASI step 1 data processed with manage_iasi.py that lie within the path given. The data will be 
+	returned as xarray dataset sorted by time. The second dimension 'n_points' will be truncated as far as possible. 
+	The initial size of this dimension was only a proxy to cover as many identified IASI pixels for one 
+	Polarstern track time step as possible.
+
+	Parameters:
+	-----------
+	path_data : str
+		Data path as string indicating the location of the processed IASI files. No subfolders will be searched.
+	"""
+
+	# identify files:
+	files = sorted(glob.glob(path_data + "*.nc"))
+	DS = xr.open_mfdataset(files, concat_dim='time', combine='nested')
+
+
+	# adjustment of time; and constrain to the specified date range:
+	DS = DS.sortby(DS.time)
+
+	# check if time duplicates exist:
+	if np.any(np.diff(DS.time.values) == np.timedelta64(0, "ns")):
+		raise RuntimeError("It seems that the processed IASI data has some duplicates. Removing them has not yet been coded. Have fun.")
+	
+
+	# check how much of the dimension 'n_hits' is really needed: sufficient to check only one 
+	# of the variables with this second dimension because all others use this dimension similarly:
+	max_n_points = -1
+	n_hits_max = len(DS.n_hits)
+
+	# loop through all columns (n_hits dimension) and check if data still exists:
+	kk = 0
+	is_something_here = True		# will check if data is present at index kk of 
+									# dimension n_hits at any time step
+	while is_something_here and (kk < n_hits_max):
+		is_something_here = np.any(~np.isnan(DS['lat'].values[:,kk]))
+		if is_something_here: kk += 1
+
+	max_n_points = kk
+
+	# truncate the second dimension and removee time indices without data:
+	DS = DS.isel(n_hits=np.arange(max_n_points))
+
+	return DS
+
+
+def import_iasi_processed(
+	path_data, 
+	date_start,
+	date_end):
+
+	"""
+	Imports IASI data processed with manage_iasi.py AND manage_iasi_step2.py for a specific date range 
+	(date_start - date_end) as xarray dataset. The dimension n_hits indicates how many pixels were 
+	found in a specific spatio-temporal constraint. 
+
+	Parameters:
+	-----------
+	path_data : str
+		Data path as string indicating the location of the processed IASI files. No subfolders will be searched.
+	date_start : str
+		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_end : str
+		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	"""
+
+	# identify files in daterange:
+	files = sorted(glob.glob(path_data + "*.nc"))
+	date_start_dt = dt.datetime.strptime(date_start, "%Y-%m-%d")
+	date_end_dt = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+	# run through list: identify where date is written and check if within date range:
+	files_filtered = list()
+	for file in files:
+		file_date = dt.datetime.strptime(file[-11:-3], "%Y%m%d")
+		if file_date >= date_start_dt and file_date <= date_end_dt:
+			files_filtered.append(file)
+		
+	
+	# import:
+	DS = xr.open_mfdataset(files_filtered, concat_dim='time', combine='nested')
+
+	return DS
