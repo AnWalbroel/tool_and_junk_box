@@ -7,8 +7,11 @@ import datetime as dt
 import multiprocessing
 import sys
 import os
-# # # # sys.path.insert(0, "/mnt/f/Studium_NIM/work/Codes/MOSAiC/")
-sys.path.insert(0, "/net/blanc/awalbroe/Codes/MOSAiC/")
+
+wdir = os.getcwd() + "/"
+remote = "/net/blanc/" in wdir
+
+sys.path.insert(0, os.path.dirname(wdir[:-1]) + "/")
 from data_tools import *
 from met_tools import *
 
@@ -27,13 +30,24 @@ marker_size = 15
 
 class info_content:
 	"""
-		Compute information content based on optimal estimation ideas. To obtain the degrees
-		of freedom (DOF) from the Averaging Kernel (AK), we firstly need to perturb each component
-		of the state vector (x -> x') of the (test) data sample step by step to compute a new set
-		of perturbed observations (y'). The new observations will be fed into the retrieval to 
-		generate a perturbed retrieved state vector (x_ret'). Differences of x_ret' and x_ret 
-		divided by the difference of the (test) data state vectors x' and x yields the AK for one
-		test data sample.
+		Compute information content based on optimal estimation theory. 
+
+		Option 1 for degrees of freedom:
+		To obtain the degrees of freedom (DOF) from the Averaging Kernel (AK), we firstly need to 
+		perturb each component of the state vector (x -> x') of the (test) data sample step by 
+		step to compute a new set of perturbed observations (y'). Then proceed to compute the 
+		Jacobian matrix K (roughly dF(x)/dx ~ dy/dx). To obtain the AK, covariance matrix of the
+		state vector (S_a) over the test data set and the observation error covariance matrix
+		(S_eps) must be provided or computed. Then, the AK is computed as 
+		(K.T*S_eps^(-1)*K + S_a^(-1))^(-1) * K.T*S_eps^(-1)*K .
+
+		Option 2 for degrees of freedom: 
+		To obtain the degrees of freedom (DOF) from the Averaging Kernel (AK), we firstly need to 
+		perturb each component of the state vector (x -> x') of the (test) data sample step by 
+		step to compute a new set of perturbed observations (y'). The new observations will be fed
+		into the retrieval to generate a perturbed retrieved state vector (x_ret'). Differences of 
+		x_ret' and x_ret divided by the difference of the (test) data state vectors x' and x yields
+		the AK for one test data sample.
 
 		Computing the gain matrix is simpler: Perturb the observation vector directly (y -> y')
 		and have the retrieval generate a new x_ret'. The quotient of x_ret' - x_ret and y' - y
@@ -68,7 +82,7 @@ class info_content:
 			obs vector. Valid options: 'add', 'multiply'
 		aux_i : dict
 			Dictionary that can contain various information. It must contain information describing
-			the state vector in the key "predictand".	#############################################################################################
+			the state vector in the key "predictand".												#############################################################################################
 		suppl_data : dict
 			Dictionary containing supplemental data needed to run the PAMTRA simulations for the 
 			function new_obs.
@@ -359,14 +373,12 @@ class info_content:
 
 
 		# general settings:
-		pam.nmlSet['hydro_adaptive_grid'] = True
-		pam.nmlSet['add_obs_height_to_layer'] = False		# adds observation layer height to simulation height vector
-		pam.nmlSet['save_psd'] = False						# can save particle size distribution
 		pam.nmlSet['passive'] = True						# passive simulation
 		pam.nmlSet['active'] = False						# False: no radar
-		# # # # pam.nmlSet['data_path'] = "/home/tenweg/pamtra/"
-		pam.nmlSet['data_path'] = "/net/blanc/awalbroe/Codes/pamtra/"
-		pam.nmlSet['liq_mod'] = "TKC"						# TKC (default) or Ell
+		if remote:
+			pam.nmlSet['data_path'] = "/net/blanc/awalbroe/Codes/pamtra/"
+		else:
+			pam.nmlSet['data_path'] = "/home/tenweg/pamtra/"
 
 		# define the pamtra profile: temp, relhum, pres, height, lat, lon, timestamp, lfrac, obs_height, ...
 		pamData = dict()
@@ -535,12 +547,13 @@ class info_content:
 		# # pamData['wind10u'] = sonde_dict['u'][0]*0.0
 		# # pamData['wind10v'] = sonde_dict['v'][0]*0.0
 		pamData['groundtemp'] = temp_sfc
-		pamData['sfc_type'] = np.ones(shape2d)
 
 		# surface properties: either use lfrac or the other 4 lines
-		pamData['sfc_model'] = np.ones(shape2d)		# 0 = sea, 1 = land --> and we ve got sea conditions only
+		pamData['sfc_type'] = np.ones(shape2d)
+		pamData['sfc_model'] = np.zeros(shape2d)		# 0 = sea, 1 = land --> and we ve got sea conditions only
 		pamData['sfc_refl'] = np.chararray(shape2d)
-		pamData['sfc_refl'][:] = "S"
+		pamData['sfc_refl'][:] = "L"
+
 
 		pamData['obs_height'] = np.broadcast_to(np.array([0.0]), shape2d + (1,))
 		
