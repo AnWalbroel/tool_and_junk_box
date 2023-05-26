@@ -214,7 +214,8 @@ def numpydatetime64_to_epochtime(npdt_array):
 	"""
 	Converts numpy datetime64 array to array in seconds since 1970-01-01 00:00:00 UTC (type:
 	float).
-	Alternatively, just use "some_array.astype(np.float64)".
+	Alternatively, just use "some_array.astype(np.float64)" or it might be needed to first
+	convert to some_array.astype("datetime64[s]").astype(np.float64).
 
 	Parameters:
 	-----------
@@ -1527,84 +1528,6 @@ def save_PS_mastertrack_as_nc(
 
 	PS_DS.to_netcdf(export_file, mode='w', format="NETCDF4", encoding=encoding)
 	PS_DS.close()
-
-
-def save_MOSAiC_Radiosondes_PS122_Level2_as_nc(
-	export_file,
-	rs_dict,
-	attribute_info):
-
-	"""
-	Saves single MOSAiC Polarstern Level 2 Radiosonde to a netCDF4 file.
-
-	Parameters:
-	-----------
-	export_file : str
-		Path and filename to which the file is to be saved to.
-	rs_dict : dict
-		Dictionary that contains the radiosonde information.
-	attribute_info : dict
-		Dictionary that contains global attributes found in the .tab header.
-	"""
-
-	RS_DS = xr.Dataset({'Latitude': 	(['time'], rs_dict['Latitude'],
-										{'units': "deg N"}),
-						'Longitude':	(['time'], rs_dict['Longitude'],
-										{'units': "deg E"}),
-						'Altitude':		(['time'], rs_dict['Altitude'],
-										{'description': "Altitude",
-										'units': "m"}),
-						'h_geom':		(['time'], rs_dict['h_geom'],
-										{'description': "Geometric Height",
-										'units': "m"}),
-						'ETIM':			(['time'], rs_dict['ETIM'],
-										{'description': "Elapsed time since sonde start"}),
-						'P':			(['time'], rs_dict['P'],
-										{'description': "hPa",
-										'units': "deg"}),
-						'T':			(['time'], rs_dict['T'],
-										{'description': "Temperature",
-										'units': "deg C"}),
-						'RH':			(['time'], rs_dict['RH'],
-										{'description': "Relative humidity",
-										'units': "percent"}),
-						'wdir':			(['time'], rs_dict['wdir'],
-										{'description': "Wind direction",
-										'units': "deg"}),
-						'wspeed':		(['time'], rs_dict['wspeed'],
-										{'description': "Wind speed",
-										'units': "m s^-1"}),
-						'q':			(['time'], rs_dict['q'],
-										{'description': "Specific humidity",
-										'conversion': "Saturation water vapour pressure based on Hyland and Wexler, 1983.",
-										'units': "kg kg^-1"}),
-						'rho_v':		(['time'], rs_dict['rho_v'],
-										{'description': "Absolute humidity",
-										'conversion': "Saturation water vapour pressure based on Hyland and Wexler, 1983.",
-										'units': "kg m^-3"}),
-						'IWV':			([], rs_dict['IWV'],
-										{'description': "Integrated Water Vapour",
-										'calculation': ("Integration of (specific humidity x pressure). " +
-														"Humidity conversion based on Hyland and Wexler, 1983. "),
-										'further_comment': ("IWV computation function checks if pressure truely " +
-															"decreases with increasing time since sonde start."),
-										'units': "kg m^-2"})},
-						coords = 		{'time': (['time'], rs_dict['time_sec'],
-										{'description': "Time stamp or seconds since 1970-01-01 00:00:00 UTC",
-										'units': "seconds since 1970-01-01 00:00:00 UTC"})})
-
-	# Set global attributes:
-	for attt in attribute_info:
-		if (":" in attt[0]) & (len(attt) > 1):
-			RS_DS.attrs[attt[0].replace(":","")] = attt[1]
-	RS_DS.attrs['Author_of_netCDF'] = "Andreas Walbroel, a.walbroel@uni-koeln.de"
-
-	# encode time:
-	RS_DS['time'].encoding['units'] = 'seconds since 1970-01-01 00:00:00'
-	RS_DS['time'].encoding['dtype'] = 'double'
-
-	RS_DS.to_netcdf(export_file, mode='w', format="NETCDF4")
-	RS_DS.close()
 
 
 def write_polarstern_track_data_into_mwr_pro_output(
