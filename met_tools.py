@@ -44,9 +44,15 @@ def compute_IWV(
 	"""
 
 	# Check if the height axis is sorted in ascending order:
-	if np.any((z[1:] - z[:-1]) < 0):
-		raise ValueError("Height axis must be in ascending order to compute the integrated" +
+	if np.any(np.diff(z) < 0):
+		print("Warning! Height axis must be in ascending order to compute the integrated" +
 			" water vapour.")
+
+		# if the pressure data is okay until 300 hPa, compute IWV nonetheless and truncate the
+		# profile beyond:
+		where_broken = np.where(np.diff(z) < 0)[0]		# when where_broken == 152, then z[153] - z[152] is broken
+		if z[where_broken[0]] < 9000.0:	# then, sufficient altitude doesn't have valid data valid data, return IWV=nan
+			return IWV
 
 	n_height = len(z)
 	# Check if rho_v has got any gaps:
@@ -92,7 +98,12 @@ def compute_IWV(
 					
 					elif (len(next_nonnan_idx) > 0) and (prev_nonnan_idx < 0):	# bottom of height grid
 						next_nonnan_idx = next_nonnan_idx[0] + k	# plus k because searched over part of rho_v
-						IWV += 0.5*rho_v[next_nonnan_idx]*(z[k+1] - z[k])
+
+						# fixing height grid variable in case only the lowest measurement doesn't exist:
+						if np.isnan(z[0]) and not (np.isnan(z[1]+z[2])):
+							IWV += 0.5*rho_v[next_nonnan_idx]*(z[2] - z[1])
+						else:
+							IWV += 0.5*rho_v[next_nonnan_idx]*(z[k+1] - z[k])
 						
 
 					else: # reached top of grid
@@ -102,6 +113,8 @@ def compute_IWV(
 					prev_nonnan_idx = k
 
 					if k == 0:			# bottom of grid
+						IWV += 0.5*rho_v[k]*(z[k+1] - z[k])
+					elif k == 1 and np.isnan(z[k-1]):	# next to bottom of grid
 						IWV += 0.5*rho_v[k]*(z[k+1] - z[k])
 					elif (k > 0) and (k < n_height-1):	# mid of grid
 						IWV += 0.5*rho_v[k]*(z[k+1] - z[k-1])
@@ -150,7 +163,11 @@ def compute_IWV(
 					
 					elif (len(next_nonnan_idx) > 0) and (prev_nonnan_idx < 0):	# bottom of height grid
 						next_nonnan_idx = next_nonnan_idx[0] + k	# plus k because searched over part of rho_v
-						IWV += rho_v[next_nonnan_idx]*(z[k+1] - z[k])
+
+						if np.isnan(z[0]) and not (np.isnan(z[1]+z[2])):
+							IWV += rho_v[next_nonnan_idx]*(z[2] - z[1])
+						else:
+							IWV += rho_v[next_nonnan_idx]*(z[k+1] - z[k])
 						
 
 					else: # reached top of grid
@@ -198,11 +215,18 @@ def compute_IWV_q(
 		levels are used to compute IWV. Recommendation and default: 'balanced'
 	"""
 
+	IWV = np.nan
+
 	# Check if the Pressure axis is sorted in descending order:
-	if np.any((press[1:] - press[:-1]) > 0):
-		pdb.set_trace()
-		raise ValueError("Height axis must be in ascending order to compute the integrated" +
+	if np.any(np.diff(press) > 0):
+		print("Warning! Height axis must be in ascending order (pressure in descending) to compute the integrated" +
 			" water vapour.")
+
+		# if the pressure data is okay until 300 hPa, compute IWV nonetheless and truncate the
+		# profile beyond:
+		where_broken = np.where(np.diff(press) > 0)[0]		# when where_broken == 152, then press[153] - press[152] is broken
+		if press[where_broken[0]] > 30000.0:	# then, sufficient altitude doesn't have valid data valid data, return IWV=nan
+			return IWV
 
 	n_height = len(press)
 	# Check if q has got any gaps:
@@ -249,7 +273,12 @@ def compute_IWV_q(
 					
 					elif (len(next_nonnan_idx) > 0) and (prev_nonnan_idx < 0):	# bottom of height grid
 						next_nonnan_idx = next_nonnan_idx[0] + k	# plus k because searched over part of q
-						IWV -= 0.5*q[next_nonnan_idx]*(press[k+1] - press[k])
+
+						# fixing height grid variable in case only the lowest measurement doesn't exist:
+						if np.isnan(press[0]) and not (np.isnan(press[1]+press[2])):
+							IWV -= 0.5*q[next_nonnan_idx]*(press[2] - press[1])
+						else:
+							IWV -= 0.5*q[next_nonnan_idx]*(press[k+1] - press[k])
 						
 
 					else: # reached top of grid
@@ -259,6 +288,8 @@ def compute_IWV_q(
 					prev_nonnan_idx = k
 
 					if k == 0:			# bottom of grid
+						IWV -= 0.5*q[k]*(press[k+1] - press[k])
+					elif k == 1 and np.isnan(press[k-1]):		# next to bottom of grid
 						IWV -= 0.5*q[k]*(press[k+1] - press[k])
 					elif (k > 0) and (k < n_height-1):	# mid of grid
 						IWV -= 0.5*q[k]*(press[k+1] - press[k-1])
@@ -307,7 +338,12 @@ def compute_IWV_q(
 					
 					elif (len(next_nonnan_idx) > 0) and (prev_nonnan_idx < 0):	# bottom of height grid
 						next_nonnan_idx = next_nonnan_idx[0] + k	# plus k because searched over part of q
-						IWV -= q[next_nonnan_idx]*(press[k+1] - press[k])
+
+						# fixing height grid variable in case only the lowest measurement doesn't exist:
+						if np.isnan(press[0]) and not (np.isnan(press[1]+press[2])):
+							IWV -= q[next_nonnan_idx]*(press[2] - press[1])
+						else:
+							IWV -= q[next_nonnan_idx]*(press[k+1] - press[k])
 						
 
 					else: # reached top of grid
@@ -958,7 +994,7 @@ def convert_spechum_to_mix_rat(
 	q : float or array of floats
 		Specific humidity in kg kg-1.
 	q_add : float or array of floats
-		Sum of other hydrometeors (i.e., cloud liquid, cloud ice, snow) as
+		Sum of other hydrometeors (i.e., cloud liquid, cloud ice, snow, rain) as
 		'specific' contents (in kg kg-1). 
 	"""
 
@@ -1138,7 +1174,12 @@ def detect_hum_inversions(
 					q_inv_loc['bot'][:len(q_inv_bot)] = q_inv_bot
 					q_inv_loc['top'][:len(q_inv_top)] = q_inv_top
 
+				elif (len(z_inv_top) == 0) & (len(z_inv_bot) == 1): # case when q increases with height until profile top
+					# remove the unpaired inversion bottom or just return that no inversions exist:
+					return q_inv_loc, z_inv_loc
+
 				elif z_inv_top[-1] - z_inv_bot[-1] < 0:	# an inversion bottom at top of height prof might be unpaired:
+					# remove the unpaired inversion bottom:
 					i = 1
 					while ((i <= len(z_inv_bot)) and (z_inv_top[-1] - z_inv_bot[-1*i] < 0)):
 						z_inv_bot = z_inv_bot[:-1*i]
