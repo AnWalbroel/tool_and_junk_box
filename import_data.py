@@ -6255,3 +6255,355 @@ def import_iasi_processed(
 	DS = xr.open_mfdataset(files_filtered, concat_dim='time', combine='nested')
 
 	return DS
+
+
+def import_ny_alesund_radiosondes_pangaea_tab(
+	files):
+
+	"""
+	Imports radiosonde data from Ny-Alesund published to PANGAEA, i.e., 
+	https://doi.org/10.1594/PANGAEA.845373 , https://doi.org/10.1594/PANGAEA.875196 , 
+	https://doi.org/10.1594/PANGAEA.914973 . The Integrated Water Vapour will be computed using 
+	the saturation water vapour pressure according to Hyland and Wexler 1983. Measurements will be
+	given in SI units.
+	The radiosonde data will be stored in a dict with keys being the sonde index and
+	the values are 1D arrays with shape (n_data_per_sonde,). Since we have more than one sonde per
+	.tab file, single sondes must be identified via time difference (i.e., 900 seconds) or the
+	provided sonde ID (latter is only available for sondes before 2017).
+
+	Parameters:
+	-----------
+	files : str
+		List of filename + path of the Ny-Alesund radiosonde data (.tab) published on PANGAEA.
+	"""
+
+
+	# Ny-Alesund radiosonde .tab files are often composits of multiple radiosondes (i.e., one month
+	# or a year). Therefore, first, just load the data and sort out single radiosondes later:
+	n_data_per_file = 1000000		# assumed max. length of a file for data array initialisation
+
+	# loop through files and load the data into a temporary dictionary:
+	data_dict = dict()
+	# files = files[:6]																			################################################################################################################
+	for kk, file in enumerate(files):
+
+		f_handler = open(file, 'r')
+
+		# # automatised inquiry of file length (is slower than just assuming a max number of lines):
+		# n_data_per_file = len(f_handler.readlines())
+		# f_handler.seek(0)	# set position of pointer back to beginning of file
+
+		translator_dict = {'Date/Time': "time",
+							'Altitude [m]': "height",
+							'PPPP [hPa]': "pres",
+							'TTT [°C]': "temp",
+							'RH [%]': "relhum",
+							'ff [m/s]': "wspeed",
+							'dd [deg]': "wdir"}		# translates naming from .tab files to the convention used here
+
+		print(kk, file)
+		str_kk = str(kk)	# string index of file
+		data_dict[str_kk] = {'time': np.full((n_data_per_file,), np.nan),		# in sec since 1970-01-01 00:00:00 UTC or numpy datetime64
+							'height': np.full((n_data_per_file,), np.nan),		# in m
+							'pres': np.full((n_data_per_file,), np.nan),		# in Pa
+							'temp': np.full((n_data_per_file,), np.nan),		# in K
+							'relhum': np.full((n_data_per_file,), np.nan),		# in [0,1]
+							'wspeed': np.full((n_data_per_file,), np.nan),		# in m s^-1
+							'wdir': np.full((n_data_per_file,), np.nan)}		# in deg
+		if "NYA_UAS_" in file:
+			translator_dict['ID'] = "ID"
+			data_dict[str_kk]['ID'] = np.full((n_data_per_file,), 20*" ")
+
+
+		mm = 0		# runs though all data points of one radiosonde and is reset to 0 for each new radiosonde
+		data_line_indicator = -1		# if this is no longer -1, then the line where data begins has been identified
+		for k, line in enumerate(f_handler):
+
+			if data_line_indicator == -1:
+				data_line_indicator = line.find("*/")		# string indicating the beginning of data
+
+			else:	# data begins:
+				current_line = line.strip().split("\t")		# split by tabs
+
+				if 'Date/Time' in current_line: 
+					data_descr = current_line	# list with data description
+
+					# identify which column of a line represents which data type:
+					data_col_id = dict()
+					for data_key in translator_dict.keys():
+						data_col_id[translator_dict[data_key]] = data_descr.index(data_key)
+
+				else:
+
+					# extract data:
+					for data_key in translator_dict.values():
+
+						try:
+							if data_key == 'time': 
+								data_dict[str_kk][data_key][mm] = np.datetime64(current_line[data_col_id[data_key]])
+							elif data_key == 'pres': 
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]])*100.0
+							elif data_key == 'temp':
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]]) + 273.15
+							elif data_key == 'relhum':
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]])*0.01
+							elif data_key == 'ID':
+								data_dict[str_kk][data_key][mm] = current_line[data_col_id[data_key]]
+
+							else:
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]])
+
+						except IndexError: 		# wind direction or wind speed data missing:
+							data_dict[str_kk]['wspeed'][mm] = float('nan')
+							data_dict[str_kk]['wdir'][mm] = float('nan')
+
+
+						except ValueError:		# then at least one measurement is missing:
+							current_line[current_line.index('')] = 'nan'		# 'repair' the data for import
+
+							if data_key == 'time': 
+								data_dict[str_kk][data_key][mm] = np.datetime64(current_line[data_col_id[data_key]])
+							elif data_key == 'pres': 
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]])*100.0
+							elif data_key == 'temp':
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]]) + 273.15
+							elif data_key == 'relhum':
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]])*0.01
+							elif data_key == 'ID':
+								data_dict[str_kk][data_key][mm] = current_line[data_col_id[data_key]]
+
+							else:
+								data_dict[str_kk][data_key][mm] = float(current_line[data_col_id[data_key]])
+
+					mm += 1
+
+		# truncate data_dict of current file:
+		for key in data_dict[str_kk].keys():
+			data_dict[str_kk][key] = data_dict[str_kk][key][:mm]
+
+
+	# concatenate all data_dict:
+	data_dict_all = dict()
+	for key in translator_dict.values():
+		for k, str_kk in enumerate(data_dict.keys()):
+			if k == 0:
+				data_dict_all[key] = data_dict[str_kk][key]
+
+				# also add ID if available:
+				if 'ID' in data_dict[str_kk].keys():
+					data_dict_all['ID'] = data_dict[str_kk]['ID']
+			else:
+				data_dict_all[key] = np.concatenate((data_dict_all[key], data_dict[str_kk][key]), axis=0)
+				if 'ID' in data_dict[str_kk].keys():
+					data_dict_all['ID'] = np.concatenate((data_dict_all['ID'], data_dict[str_kk]['ID']), axis=0)
+
+
+	# clear memory:
+	del data_dict
+
+
+	# identify single radiosondes based on time difference or sonde ID:
+	n_data = len(data_dict_all['time'])
+	new_sonde_idx = []
+	for k in range(len(data_dict_all['ID'])-1):
+		if data_dict_all['ID'][k+1] != data_dict_all['ID'][k]:
+			new_sonde_idx.append(k)
+	new_sonde_idx = np.asarray(new_sonde_idx)
+	len(new_sonde_idx)
+
+	# identify the remaining radiosondes via time stamp differences and concatenate both identifier arrays:
+	new_sonde_idx_time = np.where(np.abs(np.diff(data_dict_all['time'][new_sonde_idx[-1]+1:])) > 900.0)[0] + new_sonde_idx[-1]+1
+																			# indicates the last index belonging to the current sonde
+																			# i.e.: np.array([399,799,1194]) => 1st sonde: [0:400]
+																			# 2nd sonde: [400:800], 3rd sonde: [800:1195], 4th: [1195:]
+																			# ALSO negative time diffs must be respected because it
+																			# happens that one sonde may have been launched before the
+																			# previous one burst
+	new_sonde_idx = np.concatenate((new_sonde_idx, new_sonde_idx_time), axis=0)
+	# new_sonde_idx = np.where(np.abs(np.diff(data_dict_all['time'])) > 900.0)[0]	# this line would be for pure time-based sonde detect.
+
+	n_sondes = len(new_sonde_idx) + 1
+	rs_dict = dict()
+
+	# loop over new_sonde_idx to identify single radiosondes and save their data:
+	for k, nsi in enumerate(new_sonde_idx):
+		k_str = str(k)
+
+		# initialise rs_dict for each radiosonde:
+		rs_dict[k_str] = dict()
+
+		if (k > 0) & (k < n_sondes-1):
+			for key in translator_dict.values():
+				rs_dict[k_str][key] = data_dict_all[key][new_sonde_idx[k-1]+1:nsi+1]
+		elif k == 0:
+			for key in translator_dict.values():
+				rs_dict[k_str][key] = data_dict_all[key][:nsi+1]
+
+	# last sonde must be treated separately:
+	rs_dict[str(n_sondes-1)] = dict()
+	for key in translator_dict.values():
+		rs_dict[str(n_sondes-1)][key] = data_dict_all[key][new_sonde_idx[k]+1:]
+
+
+	# clear memory:
+	del data_dict_all
+
+
+	# finally, compute specific humidity and IWV, looping over all sondes:
+	time_nya_uas_limit = 1491044046.0
+	for s_idx in rs_dict.keys():
+
+		# limit profiles of the NYA_UAS radiosondes to 10 km height:
+		if rs_dict[s_idx]['time'][-1] < time_nya_uas_limit:
+			idx_hgt = np.where(rs_dict[s_idx]['height'] <= 10000.0)[0]
+			for key in rs_dict[s_idx].keys():
+				rs_dict[s_idx][key] = rs_dict[s_idx][key][idx_hgt]
+
+		# compute specific humidity and IWV:
+		rs_dict[s_idx]['q'] = convert_rh_to_spechum(rs_dict[s_idx]['temp'], rs_dict[s_idx]['pres'], 
+													rs_dict[s_idx]['relhum'])
+		rs_dict[s_idx]['IWV'] = compute_IWV_q(rs_dict[s_idx]['q'], rs_dict[s_idx]['pres'], nan_threshold=0.5, scheme='balanced')
+
+	return rs_dict
+
+
+def import_MOSAiC_Radiosondes_PS122_Level3_tab(filename):
+
+	"""
+	Imports level 3 radiosonde data launched from Polarstern
+	during the MOSAiC campaign. Time will be given in seconds since 1970-01-01 00:00:00 UTC
+	and datetime. Furthermore, the Integrated Water Vapour will be computed
+	using the saturation water vapour pressure according to Hyland and Wexler 1983.
+
+	Maturilli, Marion; Sommer, Michael; Holdridge, Donna J; Dahlke, Sandro; 
+	Graeser, Jürgen; Sommerfeld, Anja; Jaiser, Ralf; Deckelmann, Holger; 
+	Schulz, Alexander (2022): MOSAiC radiosonde data (level 3). PANGAEA, 
+	https://doi.org/10.1594/PANGAEA.943870
+
+	Parameters:
+	-----------
+	filename : str
+		Filename + path of the Level 3 radiosonde data (.tab) downloaded from the DOI
+		given above.
+	"""
+
+	n_sonde_prel = 3000		# just a preliminary assumption of the amount of radiosondes
+	n_data_per_sonde = 12000	# assumption of max. time points per sonde
+	reftime = np.datetime64("1970-01-01T00:00:00")
+	# the radiosonde dict will be structured as follows:
+	# rs_dict['0'] contains all data from the first radiosonde: rs_dict['0']['T'] contains temperature
+	# rs_dict['1'] : second radiosonde, ...
+	# this structure allows to have different time dimensions for each radiosonde
+	rs_dict = dict()
+	for k in range(n_sonde_prel):
+		rs_dict[str(k)] = {'time': np.full((n_data_per_sonde,), reftime),		# np datetime64
+							'time_sec': np.full((n_data_per_sonde,), np.nan),	# in seconds since 1970-01-01 00:00:00 UTC
+							'Latitude': np.full((n_data_per_sonde,), np.nan),	# in deg N
+							'Longitude': np.full((n_data_per_sonde,), np.nan),	# in deg E
+							'Altitude': np.full((n_data_per_sonde,), np.nan),	# gps altitude above WGS84 in m
+							'h_geop': np.full((n_data_per_sonde,), np.nan),		# geopotential height in m
+							'h_gps': np.full((n_data_per_sonde,), np.nan),		# geometric/GPS receiver height in m
+							'P': np.full((n_data_per_sonde,), np.nan),			# in hPa
+							'T': np.full((n_data_per_sonde,), np.nan),			# in K
+							'RH': np.full((n_data_per_sonde,), np.nan),			# in percent
+							'mixrat': np.full((n_data_per_sonde,), np.nan),		# in mg kg-1
+							'wdir': np.full((n_data_per_sonde,), np.nan),		# in deg
+							'wspeed': np.full((n_data_per_sonde,), np.nan),		# in m s^-1
+							'IWV': np.full((n_data_per_sonde,), np.nan)}		# in kg m-2
+
+
+	f_handler = open(filename, 'r')
+
+	# identify header size and save global attributes:
+	attribute_info = list()
+	for k, line in enumerate(f_handler):
+		if line.strip().split("\t")[0] in ['Citation:', 'Project(s):', 'Abstract:', 'Keyword(s):']:
+			attribute_info.append(line.strip().split("\t"))	# split by tabs
+		if line.strip() == "*/":
+			break
+
+	m = -1		# used as index to save the entries into rs_dict; will increase for each new radiosonde
+	mm = 0		# runs though all time points of one radiosonde and is reset to 0 for each new radiosonde
+	precursor_event = ''
+	for k, line in enumerate(f_handler):
+		if k == 0:
+			headerline = line.strip().split("\t")
+
+		if k > 0:		# skip header
+			current_line = line.strip().split("\t")		# split by tabs
+			current_event = current_line[0]			# marks the radiosonde launch
+
+			if current_event != precursor_event:	# then a new sonde is found in the current_line
+				m = m + 1
+				mm = 0
+
+			# convert time stamp to seconds since 1970-01-01 00:00:00 UTC:
+			rs_dict[str(m)]['time'][mm] = np.datetime64(current_line[1])
+			rs_dict[str(m)]['time_sec'][mm] = rs_dict[str(m)]['time'][mm].astype(np.float64)
+
+			# extract other info:
+			try:
+				rs_dict[str(m)]['Latitude'][mm] = float(current_line[10])
+				rs_dict[str(m)]['Longitude'][mm] = float(current_line[8])
+				rs_dict[str(m)]['Altitude'][mm] = float(current_line[6])
+				rs_dict[str(m)]['h_geop'][mm] = float(current_line[2])
+				rs_dict[str(m)]['h_gps'][mm] = float(current_line[4])
+				rs_dict[str(m)]['P'][mm] = float(current_line[12])
+				rs_dict[str(m)]['T'][mm] = float(current_line[16])
+				rs_dict[str(m)]['RH'][mm] = float(current_line[18])
+				rs_dict[str(m)]['mixrat'][mm] = float(current_line[22])
+				rs_dict[str(m)]['wdir'][mm] = float(current_line[30])
+				rs_dict[str(m)]['wspeed'][mm] = float(current_line[32])
+				try:
+					rs_dict[str(m)]['IWV'][mm] = float(current_line[41])
+				except IndexError:	# sometimes, the final two columns just don't exist...whyever
+					rs_dict[str(m)]['IWV'][mm] = float('nan')
+
+			except ValueError:		# then at least one measurement is missing:
+				for ix, cr in enumerate(current_line):
+					if cr == '':
+						current_line[ix] = 'nan'
+				try:
+					rs_dict[str(m)]['Latitude'][mm] = float(current_line[10])
+					rs_dict[str(m)]['Longitude'][mm] = float(current_line[8])
+					rs_dict[str(m)]['Altitude'][mm] = float(current_line[6])
+					rs_dict[str(m)]['h_geop'][mm] = float(current_line[2])
+					rs_dict[str(m)]['h_gps'][mm] = float(current_line[4])
+					rs_dict[str(m)]['P'][mm] = float(current_line[12])
+					rs_dict[str(m)]['T'][mm] = float(current_line[16])
+					rs_dict[str(m)]['RH'][mm] = float(current_line[18])
+					rs_dict[str(m)]['mixrat'][mm] = float(current_line[22])
+					rs_dict[str(m)]['wdir'][mm] = float(current_line[30])
+					rs_dict[str(m)]['wspeed'][mm] = float(current_line[32])
+					rs_dict[str(m)]['IWV'][mm] = float(current_line[41])
+
+				except IndexError:		# GPS connection lost
+					rs_dict[str(m)]['Latitude'][mm] = float('nan')
+					rs_dict[str(m)]['Longitude'][mm] = float('nan')
+					rs_dict[str(m)]['Altitude'][mm] = float('nan')
+					rs_dict[str(m)]['h_geop'][mm] = float(current_line[6])
+					rs_dict[str(m)]['h_gps'][mm] = float('nan')
+					rs_dict[str(m)]['P'][mm] = float(current_line[12])
+					rs_dict[str(m)]['T'][mm] = float(current_line[16])
+					rs_dict[str(m)]['RH'][mm] = float(current_line[18])
+					rs_dict[str(m)]['mixrat'][mm] = float(current_line[22])
+					rs_dict[str(m)]['wdir'][mm] = float('nan')
+					rs_dict[str(m)]['wspeed'][mm] = float('nan')
+					rs_dict[str(m)]['IWV'][mm] = float('nan')
+
+			mm = mm + 1
+			precursor_event = current_event
+
+	# truncate redundantly initialised sondes:
+	for k in range(m+1, n_sonde_prel): del rs_dict[str(k)]
+	
+	# finally truncate unneccessary time dimension for each sonde and compute IWV:
+	for k in range(m+1):
+		last_nonnan = np.where(~np.isnan(rs_dict[str(k)]['time_sec']))[0][-1] + 1		# + 1 because of python indexing
+		for key in rs_dict[str(k)].keys(): rs_dict[str(k)][key] = rs_dict[str(k)][key][:last_nonnan]
+		rs_dict[str(k)]['q'] = np.asarray([convert_rh_to_spechum(t, p*100.0, rh/100.0) 
+								for t, p, rh in zip(rs_dict[str(k)]['T'], rs_dict[str(k)]['P'], rs_dict[str(k)]['RH'])])
+
+		rs_dict[str(k)]['IWV'] = rs_dict[str(k)]['IWV'][~np.isnan(rs_dict[str(k)]['IWV'])][-1]
+
+	return rs_dict, attribute_info
