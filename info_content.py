@@ -417,6 +417,7 @@ class info_content:
 																											# # due to the conversion, and potentially overexpose
 																											# # the effect by the perturbation lateron?
 				# if 'q' in self.aux_i['predictand']:
+					# # pdb.set_trace() # check for correct units
 					# q_lev = self.x_i[x_idx['q'][0]:x_idx['q'][1]]
 
 					# rho_v_lev = convert_spechum_to_abshum(temp_lev, 
@@ -453,6 +454,7 @@ class info_content:
 
 				# we need relative humidity: thus, if q is a predictand, it needs to be converted
 				if 'q' in self.aux_i['predictand']:
+					pdb.set_trace() # check units
 					q_lev = self.x_ip[x_idx['q'][0]:x_idx['q'][1]]
 
 					rho_v_lev = convert_spechum_to_abshum(temp_lev, pres_lev, q_lev)
@@ -472,6 +474,7 @@ class info_content:
 																											# # due to the conversion, and potentially overexpose
 																											# # the effect by the perturbation lateron?
 				# if 'q' in self.aux_i['predictand']:
+					# # pdb.set_trace() # check for correct units
 					# q_lev = self.x_i[x_idx['q'][0]:x_idx['q'][1]]
 
 					# rho_v_lev = convert_spechum_to_abshum(temp_lev, 
@@ -511,6 +514,7 @@ class info_content:
 
 				# we need relative humidity: thus, if q is a predictand, it needs to be converted
 				if 'q' in self.aux_i['predictand']:
+					pdb.set_trace() # check units
 					q_lev = self.x_ip_mat[:, x_idx['q'][0]:x_idx['q'][1]]
 
 					rho_v_lev = convert_spechum_to_abshum(temp_lev, pres_lev, q_lev)
@@ -837,6 +841,12 @@ class info_content:
 		# labels:
 		a1.set_ylabel("Height (m)", fontsize=fs)
 		a1.set_xlabel("Averaging Kernel diagonal (K/K)", fontsize=fs)
+
+
+		# check if output path exists:
+		plotpath_dir = os.path.dirname(path_output)
+		if not os.path.exists(plotpath_dir):
+			os.makedirs(plotpath_dir)
 
 		plot_file = path_output + f"MOSAiC_synergetic_ret_info_content_AK_diag_mean_DOF_{self.aux_i['file_descr']}.png"
 		f1.savefig(plot_file, dpi=300, bbox_inches='tight')
