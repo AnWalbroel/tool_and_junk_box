@@ -34,9 +34,23 @@ class radiometers:
 		include_pres_sfc : bool
 			Used for instrument = 'synthetic' for a Neural Network retrieval. If true, surface pressure
 			will also be imported and saved as class attribute.
+		include_CF : bool
+			Used for instrument = 'era5_pam' for a Neural Network retrieval. If true, a Cloud Flag (CF)
+			will be returned indicating a 0.0 in cloudfree, and 1.0 in cloudy (LWP > 0) conditions.
+		include_iwv : bool
+			Used for instrument = 'era5_pam' for a Neural Network retrieval. If true, Integrated Water
+			Vapour (IWV) will be returned to be used as predictor.
+		include_t2m : bool
+			Used for instrument = 'era5_pam' for a Neural Network retrieval. If true, the 2 m air 
+			temperature (t2m) will be returned to be used as predictor.
+		include_tb_bl : bool
+			Used for instrument = 'era5_pam' for a Neural Network retrieval. If true, boundary layer
+			scan TBs (V band only) are included as predictors. The freq_bl and ang_bl dimensions will 
+			be combined (flattened) into one so that the tb_bl will be a (time, n_freq_bl*n_ang_bl)
+			array.
 		add_TB_noise : bool
 			If True, random noise can be added to the brightness temperatures using the built-in function
-			add_TB_noise. Usually only used if instrument == 'synthetic'.
+			add_TB_noise. Usually only used if instrument in 'synthetic', 'syn_mwr_pro', 'era5_pam'.
 		noise_dict : dict
 			Dictionary that has the frequencies (with a resolution of 0.01 (.2f)) as keys and the noise 
 			strength (in K) as value. Only used in add_TB_noise == True. 
@@ -48,6 +62,9 @@ class radiometers:
 		subset_months : list of int
 			List of integer indicating the months that will be used. All other months will be discarded.
 			This option might be useful, if only summer months should be considered. Example: [6,7,8]
+		aligned_1D : bool
+			Boolean which is only relevant for instrument=='era5_pam', indicating if the simulated TBs from
+			ERA5 with PAMTRA have been aligned on a 1D or 2D spatial grid.
 		return_DS : bool
 			If True, the imported xarray dataset will also be set as a class attribute.
 	"""
@@ -55,7 +72,10 @@ class radiometers:
 	def __init__(self, path_r, instrument, **kwargs):
 
 		if instrument == 'hatpro':
-			mwr_dict = import_hatpro_level1b_daterange(path_r, kwargs['date_start'], kwargs['date_end'], verbose=1)
+			if ('version' in kwargs.keys()) and (kwargs['version'] == 'v01'):	# available on PANGAEA
+				mwr_dict = import_hatpro_level1b_daterange_pangaea(path_r, kwargs['date_start'], kwargs['date_end'])
+			else:
+				mwr_dict = import_hatpro_level1b_daterange(path_r, kwargs['date_start'], kwargs['date_end'], verbose=1)
 
 			# Unify variable names by defining class attributes:
 			self.freq = mwr_dict['freq_sb']	# in GHz
@@ -68,26 +88,32 @@ class radiometers:
 				self.TB = self.TB[self.flag == 0, :]
 				self.flag = self.flag[self.flag == 0]
 
-		if instrument == 'mirac-p' and kwargs['version'] in ['i00', 'i01', 'i02', 'i03', 'v00', 'v01']:
-			raise ValueError("Daterange importer has not yet been implemented for MiRAC-P " +
-								"TBs for version '%s'."%kwargs['version'])
+		if instrument == 'mirac-p':
+			if ('version' in kwargs.keys()) and (kwargs['version'] == 'v01'):	# available on PANGAEA
+				mwr_dict = import_mirac_level1b_daterange_pangaea(path_r, kwargs['date_start'], kwargs['date_end'])
 
-			if kwargs['truncate_flagged']:
+				# Unify variable names by defining class attributes:
+				self.freq = mwr_dict['freq_sb']	# in GHz
+				self.time = mwr_dict['time']	# in sec since 1970-01-01 00:00:00 UTC
+				self.TB = mwr_dict['tb']		# in K, (time,freq)
+				self.flag = mwr_dict['flag']
+
+			elif ('version' in kwargs.keys()) and (kwargs['version'] == 'RPG'):
+				mwr_dict = import_mirac_BRT_RPG_daterange(path_r, kwargs['date_start'], kwargs['date_end'], verbose=1)
+
+				# Unify variable names by defining class attributes:
+				self.freq = mwr_dict['Freq']	# in GHz
+				self.time = mwr_dict['time']	# in sec since 1970-01-01 00:00:00 UTC
+				self.TB = mwr_dict['TBs']		# in K, time x freq
+				self.flag = mwr_dict['RF']
+
+			else:
+				raise RuntimeError(f"Other MiRAC-P TB data version than {kwargs['version']} have not been implemented yet.")
+
+
+			# truncate flagged data if desired:
+			if 'truncate_flagged' in kwargs.keys() and kwargs['truncate_flagged']:
 				self.flag[self.flag == 16] = 0				# because of sanity_receiver_band1
-				self.time = self.time[self.flag == 0]
-				self.TB = self.TB[self.flag == 0, :]
-				self.flag = self.flag[self.flag == 0]
-
-		elif instrument == 'mirac-p' and kwargs['version'] == 'RPG':
-			mwr_dict = import_mirac_BRT_RPG_daterange(path_r, kwargs['date_start'], kwargs['date_end'], verbose=1)
-
-			# Unify variable names by defining class attributes:
-			self.freq = mwr_dict['Freq']	# in GHz
-			self.time = mwr_dict['time']	# in sec since 1970-01-01 00:00:00 UTC
-			self.TB = mwr_dict['TBs']		# in K, time x freq
-			self.flag = mwr_dict['RF']
-
-			if kwargs['truncate_flagged']:
 				self.time = self.time[self.flag == 0]
 				self.TB = self.TB[self.flag == 0, :]
 				self.flag = self.flag[self.flag == 0]
@@ -104,7 +130,7 @@ class radiometers:
 			# If desired, random noise can be added:
 			if 'add_TB_noise' in kwargs.keys():
 				if kwargs['add_TB_noise'] and ('noise_dict' in kwargs.keys()):
-					self.add_TB_noise(kwargs['noise_dict'])
+					self.TB = self.add_TB_noise(self.TB, self.freq, kwargs['noise_dict'])
 
 				elif kwargs['add_TB_noise'] and ('noise_dict' not in kwargs.keys()):
 					raise KeyError("Class radiometers requires 'noise_dict' if 'add_TB_noise' is True.")
@@ -147,7 +173,7 @@ class radiometers:
 			# If desired, random noise can be added:
 			if 'add_TB_noise' in kwargs.keys():
 				if kwargs['add_TB_noise'] and ('noise_dict' in kwargs.keys()):
-					self.add_TB_noise(kwargs['noise_dict'])
+					self.TB = self.add_TB_noise(self.TB, self.freq, kwargs['noise_dict'])
 
 				elif kwargs['add_TB_noise'] and ('noise_dict' not in kwargs.keys()):
 					raise KeyError("Class radiometers requires 'noise_dict' if 'add_TB_noise' is True.")
@@ -166,14 +192,15 @@ class radiometers:
 
 			MWR_DS = xr.open_mfdataset(path_r, concat_dim='time', combine='nested')
 
-			# MWR_DS = MWR_DS.isel(x=np.arange(0,71,9))			################																						###############
-			# MWR_DS = MWR_DS.isel(time=[1], x=np.arange(0,9,9))			################																						###############
 
 			# Cut unwanted dimensions in variables:
 			MWR_DS['ang'] = MWR_DS.ang[0,:]
 			MWR_DS['freq'] = MWR_DS.freq[0,:]		# eliminate time dependency
-			MWR_DS['tb'] = MWR_DS.tb[:,:,:,0,0,:,:].mean(axis=-1)	# averaged over polarization,
+			if 'aligned_1D' in kwargs.keys() and kwargs['aligned_1D']:
+				MWR_DS['tb'] = MWR_DS.tb[:,:,0,0,:,:].mean(axis=-1)	# averaged over polarization,
 																	# reduced to desired output level and angle
+			else:
+				MWR_DS['tb'] = MWR_DS.tb[:,:,:,0,0,:,:].mean(axis=-1)
 
 
 			# make sure that frequency array is sorted in ascending order:
@@ -212,13 +239,86 @@ class radiometers:
 			# If desired, random noise can be added:
 			if 'add_TB_noise' in kwargs.keys():
 				if kwargs['add_TB_noise'] and ('noise_dict' in kwargs.keys()):
-					self.add_TB_noise(kwargs['noise_dict'], xarray_compatibility=True, freq_dim_name='nfreq')
+					self.TB = self.add_TB_noise(self.TB, self.freq, kwargs['noise_dict'], 
+															xarray_compatibility=True, freq_dim_name='nfreq')
 
 				elif kwargs['add_TB_noise'] and ('noise_dict' not in kwargs.keys()):
 					raise KeyError("Class radiometers requires 'noise_dict' if 'add_TB_noise' is True.")
 
-			if kwargs['include_pres_sfc']:
-				raise KeyError("'include_pres_sfc' not implemented in the uploaded version on ZENODO.")
+
+			if ('include_pres_sfc' in kwargs.keys()) and kwargs['include_pres_sfc']:
+				raise KeyError("'include_pres_sfc' has not been implemented in the version uploaded on ZENODO.")
+
+			if ('include_CF' in kwargs.keys()) and kwargs['include_CF']:
+				lwp_thres = 0.01
+				idx_cloudfree = np.where(MWR_DS.lwp <= lwp_thres)
+				CF = np.ones(MWR_DS.lwp.shape)
+				CF[idx_cloudfree] = (1.0/lwp_thres)*MWR_DS.lwp.values[idx_cloudfree]		# linear transition from cloud flag 0.0 to 1.0
+				# CF[idx_cloudfree] = 0.0		# if cloudfree: CF == 0.0; if cloudy (LWP > lwp_thres): CF == 1
+				self.CF = CF
+
+			if ('include_iwv' in kwargs.keys()) and kwargs['include_iwv']:
+				# and add random noise:
+				self.iwv = MWR_DS.iwv.values
+				self.iwv = self.iwv + np.random.normal(0.0, 0.25, size=self.iwv.shape)
+				self.iwv[self.iwv < 0.] = 0.
+
+			if ('include_t2m' in kwargs.keys()) and kwargs['include_t2m']:
+				# also add random noise:
+				self.t2m = MWR_DS.temp[:,:,0].values
+				self.t2m += np.random.normal(0.0, 0.0, size=self.t2m.shape)
+
+
+			if ('include_tb_bl' in kwargs.keys()) and kwargs['include_tb_bl']:
+				# select right angles:
+				zen_ang_bl = np.array([0., 60., 70.8, 75.6, 78.6, 81.6, 83.4, 84.6])
+				MWR_DS = MWR_DS.assign_coords({'nang_bl': MWR_DS['ang_bl'][0,:].values})
+				MWR_DS['ang_bl'] = MWR_DS['ang_bl'][0,:]
+				MWR_DS = MWR_DS.interp(nang_bl=zen_ang_bl)
+
+				MWR_DS['freq_bl'] = MWR_DS.freq_bl[0,:]
+				if 'aligned_1D' in kwargs.keys() and kwargs['aligned_1D']:
+					MWR_DS['tb_bl'] = MWR_DS.tb_bl[:,:,0,:,:,:].mean(axis=-1)	# avg over polarization
+														# reduced to desired output level and angle
+				else:
+					MWR_DS['tb_bl'] = MWR_DS.tb_bl[:,:,:,0,:,:,:].mean(axis=-1)
+
+
+				# add TB noise and add as class attributes:
+				self.TB_BL = MWR_DS.tb_bl
+				self.freq_bl = MWR_DS.freq_bl
+				n_ang_bl = len(MWR_DS.ang_bl)
+				n_freq_bl = len(MWR_DS.freq_bl)
+				n_time = len(MWR_DS.time)
+				n_x = len(MWR_DS.x)
+				TB_BL_noise = np.zeros(self.TB_BL.shape)
+
+				for i_ang in range(n_ang_bl):
+					TB_BL_noise[:,:,i_ang,:] = self.add_TB_noise(self.TB_BL[:,:,i_ang,:], self.freq_bl,
+																kwargs['noise_dict'], xarray_compatibility=True, 
+																freq_dim_name='nfreq_bl')
+				self.TB_BL = TB_BL_noise
+
+
+				# combine frequency and angle dimensions and convert to numpy arrays:
+				# Two options to choose (comment out the one that is not chosen): 
+				# 1. The following 5 lines create an input vector tb_bl_r similar to MWR_PRO's boundary layer
+				# scan temperature profile retrieval. 2. The line below "1." merely concatenates all freqs and
+				# angles (but in a different order than under "1.").
+				# 1. MWR_PRO-like
+				tb_bl_r = self.TB_BL[:,:,0,:]
+				for i_freq_bl, freq_bl in enumerate(self.freq_bl.values):
+					if np.any(np.abs(np.array([54.94,56.66,57.30,58.00]) - freq_bl) < 0.05):
+						tb_bl_r = np.concatenate((tb_bl_r, self.TB_BL[:,:,1:,i_freq_bl]), axis=-1)
+				self.TB_BL = tb_bl_r
+
+				# 2. all freqs and angles:
+				# self.TB_BL = np.reshape(self.TB_BL, (n_time, n_x, n_freq_bl*n_ang_bl))
+
+				self.freq_bl = self.freq_bl.values
+				self.ele_bl = 90.0 - MWR_DS.nang_bl.values			# elevation angles in deg
+				MWR_DS['ele_bl'] = 90.0 - MWR_DS.nang_bl
+
 
 			# also possible to return the xarray dataset
 			if ('return_DS' in kwargs.keys()) and kwargs['return_DS']:
@@ -229,7 +329,7 @@ class radiometers:
 			self.time = self.time.values
 			self.TB = self.TB.values
 
-	def add_TB_noise(self, noise_dict, xarray_compatibility=False, freq_dim_name=""):
+	def add_TB_noise(self, TB, freq, noise_dict, xarray_compatibility=False, freq_dim_name=""):
 
 		"""
 		Adds random (un)correlated noise to the brightness temperatures, which must be
@@ -237,6 +337,11 @@ class radiometers:
 
 		Parameters:
 		-----------
+		TB : array of floats or DataArray
+			Array containing the TB data in Kon a time x freq grid. Noise will be added to this 
+			data and saved to the same variable name.
+		freq : array of floats or DataArray
+			Frequencies of the TB data in GHz. Must be in ascending order.
 		noise_dict : dict
 			Dictionary that has the frequencies (with .2f floating point precision) as keys
 			and the noise strength (in K) as value. Example: '190.71': 3.0
@@ -253,26 +358,28 @@ class radiometers:
 			raise ValueError("Please specify 'freq_dim_name' when using the xarray compatible mode.")
 
 		if not xarray_compatibility:
-			n_time = self.TB.shape[0]
+			n_time = TB.shape[0]
 
 			# Loop through frequencies. Find which frequency is currently addressed and
 			# create respective noise:
 			for freq_sel in noise_dict.keys():
-				frq_idx = np.where(np.isclose(self.freq, float(freq_sel), atol=0.01))[0]
+				frq_idx = np.where(np.isclose(freq, float(freq_sel), atol=0.01))[0]
 				if len(frq_idx) > 0:
 					frq_idx = frq_idx[0]
-					self.TB[:,frq_idx] = self.TB[:,frq_idx] + np.random.normal(0.0, noise_dict[freq_sel], size=n_time)
+					TB[:,frq_idx] = TB[:,frq_idx] + np.random.normal(0.0, noise_dict[freq_sel], size=n_time)
 		else:
 
 			# Loop through frequencies. Find which frequency is currently addressed and
 			# create respective noise:
 			for freq_sel in noise_dict.keys():
-				frq_idx = np.where(np.isclose(self.freq, float(freq_sel), atol=0.01))[0]
+				frq_idx = np.where(np.isclose(freq, float(freq_sel), atol=0.01))[0]
 				if len(frq_idx) > 0:
 					frq_idx = frq_idx[0]
-					self.TB[{freq_dim_name: frq_idx}] = (self.TB[{freq_dim_name: frq_idx}] + 
+					TB[{freq_dim_name: frq_idx}] = (TB[{freq_dim_name: frq_idx}] + 
 															np.random.normal(0.0, noise_dict[freq_sel],
-																size=self.TB[{freq_dim_name: frq_idx}].shape))
+																size=TB[{freq_dim_name: frq_idx}].shape))
+
+		return TB
 
 	def get_calibration_times(self, instrument, to_epochtime):
 
@@ -339,6 +446,10 @@ class radiosondes:
 
 	def __init__(self, path_r, s_version='level_2', single=False, with_wind=False, **kwargs):
 
+		with_lwp = False
+		if "with_lwp" in kwargs.keys():
+			with_lwp = kwargs['with_lwp']
+
 		if single:
 			if s_version == 'level_2':
 				sonde_dict = import_single_PS122_mosaic_radiosonde_level2(path_r)
@@ -352,11 +463,6 @@ class radiosondes:
 
 		else:
 			if s_version == 'mwr_pro':
-
-				with_lwp = False
-				if "with_lwp" in kwargs.keys():
-					with_lwp = kwargs['with_lwp']
-
 				sonde_dict = import_mwr_pro_radiosondes(path_r, with_lwp=with_lwp)
 
 			else:
@@ -369,8 +475,11 @@ class radiosondes:
 									"data + filename itself if single == True. If s_version == 'mwr_pro' " +
 									"path_r can be a list of strings where each entry contains path and filename.")
 
+				remove_failed = False
+				if ('remove_failed' in kwargs.keys()) and kwargs['remove_failed']: remove_failed=True
+
 				sonde_dict = import_radiosonde_daterange(path_r, kwargs['date_start'], kwargs['date_end'], s_version=s_version,
-															remove_failed=kwargs['remove_failed'], with_wind=with_wind, verbose=1)
+															remove_failed=remove_failed, with_wind=with_wind, verbose=1)
 
 		# Unification of variable names already done in the importing routine:
 		if single:
@@ -635,7 +744,7 @@ class era_i:
 
 class era5:
 	"""
-		ERA5 reanalysis as used by Mech et al. Can be expanded to work for downloaded open-access ERA5
+		ERA5 reanalysis as used on LEVANTE. Can be expanded to work for downloaded open-access ERA5
 		netCDFs as well. Time will be in epochtime (seconds since 1970-01-01 00:00:00 UTC).
 
 		For initialisation, we need:
@@ -652,6 +761,9 @@ class era5:
 			This option might be useful, if only summer months should be considered. Example: [6,7,8]
 		return_DS : bool
 			If True, the imported xarray dataset will also be set as a class attribute.
+		processed : bool
+			Boolean indicator whether ERA5 data output from LEVANTE had been processed with 
+			training_data_new_height.py.
 	"""
 
 	def __init__(self, file, **kwargs):
@@ -666,8 +778,6 @@ class era5:
 			else:
 				raise ValueError("Didn't find any ERA5 files for import.")
 
-		# # DS = DS.isel(x=np.arange(0,71,9))			################																										########################
-		# DS = DS.isel(time=[1], x=np.arange(0,9,9))			################																										########################
 
 		# Eventually, only subset is needed: Filter time stamps:
 		# Select indices for each year in the subset:
@@ -682,53 +792,88 @@ class era5:
 		if "subset_months" in kwargs.keys() and len(kwargs['subset_months']) > 0:
 			DS = DS.isel(time=(DS.time.dt.month.isin(kwargs['subset_months'])))
 
-		# dict to rename to new (keys) from old (values) variables:
-		rename_dict = {	'temp_sfc': 'groundtemp',		# dict to rename to new (keys) from old (values) variables
-						'height': 'hgt',
-						'temp': 't',
-						'pres': 'p'}
 
-		# and a dict to convert units to SI standard: first (second) element of list:
-		# must be added to the variable (the variable must be multiplied by) to get to SI unit
-		# the multiplication is performed after adding the convert_unit_dict[key][0] value.
-		convert_unit_dict = {'rh': [0.0, 0.01]}
+		# differentiate between processed (with training_data_new_height.py) and unprocessed era5 data:
+		processed = False
+		if "processed" in kwargs.keys(): processed = kwargs['processed']
+		rename_dict = dict()
+		convert_unit_dict = dict()
 
-		# assign attributes, convert to SI units and unify naming:
-		self.launch_time = numpydatetime64_to_epochtime(DS.time.values) # in sec since 1970-01-01 00:00:00 UTC
-		self.time = self.launch_time	# synonymous
+		if not processed:
+			# dict to rename to new (keys) from old (values) variables:
+			rename_dict = {	'temp_sfc': 'groundtemp',		# dict to rename to new (keys) from old (values) variables
+							'height': 'hgt',
+							'temp': 't',
+							'pres': 'p'}
 
-		attribute_list = [	'lat', 			# in deg N
-							'lon', 			# in deg E
-							'sfc_slf', 
-							'sfc_sif', 
-							'temp_sfc', 	# in K
-							'height',		# in m
-							'temp',			# in K
-							'rh',			# in [0,1]
-							'pres',			# in Pa
-							'iwv',			# in kg m-2
-							'cwp',			# in kg m-2
-							'rwp',			# in kg m-2
-							'iwp',			# in kg m-2
-							'swp',			# in kg m-2
-							'lwp']			# in kg m-2
-		for att in attribute_list:
-			if att in DS.data_vars:
+			# and a dict to convert units to SI standard: first (second) element of list:
+			# must be added to the variable (the variable must be multiplied by) to get to SI unit
+			# the multiplication is performed after adding the convert_unit_dict[key][0] value.
+			convert_unit_dict = {'rh': [0.0, 0.01]}
+
+			# assign attributes, convert to SI units and unify naming:
+			self.launch_time = numpydatetime64_to_epochtime(DS.time.values) # in sec since 1970-01-01 00:00:00 UTC
+			self.time = self.launch_time	# synonymous
+
+			attribute_list = [	'lat', 			# in deg N
+								'lon', 			# in deg E
+								'sfc_slf', 
+								'sfc_sif', 
+								'temp_sfc', 	# in K
+								'height',		# in m
+								'temp',			# in K
+								'rh',			# in [0,1]
+								'pres',			# in Pa
+								'iwv',			# in kg m-2
+								'cwp',			# in kg m-2
+								'rwp',			# in kg m-2
+								'iwp',			# in kg m-2
+								'swp',			# in kg m-2
+								'lwp']			# in kg m-2
+			for att in attribute_list:
+				if att in DS.data_vars:
+						self.__dict__[att] = DS[att].values
+
+				elif att in rename_dict.keys():
+					if rename_dict[att] in DS.data_vars:
+						self.__dict__[att] = DS[rename_dict[att]].values
+						
+				elif att == 'lwp':
+					self.lwp = DS['cwp'].values + DS['rwp'].values
+
+				if att in convert_unit_dict:
+					self.__dict__[att] = (self.__dict__[att] + convert_unit_dict[att][0])*convert_unit_dict[att][1]
+
+
+			# compute additional variables:
+			self.q = convert_rh_to_spechum(self.temp, self.pres, self.rh)		# spec. humidity in kg kg-1
+
+		else: 	# conversion, variable renaming and computation of additional variables not needed
+
+			# assign attributes, convert to SI units and unify naming:
+			self.launch_time = numpydatetime64_to_epochtime(DS.time.values) # in sec since 1970-01-01 00:00:00 UTC
+			self.time = self.launch_time	# synonymous
+
+			attribute_list = [	'lat', 			# in deg N
+								'lon', 			# in deg E
+								'sfc_slf', 
+								'sfc_sif', 
+								'temp_sfc', 	# in K
+								'height',		# in m
+								'temp',			# in K
+								'rh',			# in [0,1]
+								'pres',			# in Pa
+								'q',			# in kg kg-1
+								'iwv',			# in kg m-2
+								'cwp',			# in kg m-2
+								'rwp',			# in kg m-2
+								'iwp',			# in kg m-2
+								'swp',			# in kg m-2
+								'lwp']			# in kg m-2
+
+			for att in attribute_list:
+				if att in DS.data_vars:
 					self.__dict__[att] = DS[att].values
-
-			elif att in rename_dict.keys():
-				if rename_dict[att] in DS.data_vars:
-					self.__dict__[att] = DS[rename_dict[att]].values
-					
-			elif att == 'lwp':
-				self.lwp = DS['cwp'].values + DS['rwp'].values
-
-			if att in convert_unit_dict:
-				self.__dict__[att] = (self.__dict__[att] + convert_unit_dict[att][0])*convert_unit_dict[att][1]
-
-
-		# compute additional variables:
-		self.q = convert_rh_to_spechum(self.temp, self.pres, self.rh)		# spec. humidity in kg kg-1
 
 
 		# also possible to return the xarray dataset
