@@ -20,9 +20,9 @@ import pdb
 """
 
 # paths:
-path_data = {	'iasi': "/mnt/f/heavy_data/IASI_mosaic/",		# subfolders may exist
+path_data = {	'iasi': "/mnt/f/heavy_data/IASI/mosaic_step1/",		# subfolders may exist
 				}
-path_output = "/mnt/f/heavy_data/IASI_mosaic_processed/"
+path_output = "/mnt/f/heavy_data/IASI/mosaic_step2/"
 
 # additional settings:
 set_dict = {'with_std': True,					# also computes std dev. for reasonable variables (iwv, temp prof, ...)

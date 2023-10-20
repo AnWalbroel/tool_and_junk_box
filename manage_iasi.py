@@ -1,5 +1,6 @@
 import numpy as np
 import xarray as xr
+import pandas as pd
 import geopy
 import geopy.distance
 import datetime as dt
@@ -17,8 +18,9 @@ import pdb
 """
 	Script to prepare IASI data for Polarstern track. Import IASI and Polarstern track data, cut
 	the data and export IASI data to a new, smaller file. No averages will be computed, all found 
-	pixels will be saved. Call this script via "python3 manage_iasi.py" or append a digit 
-	between 0 and 19 for the IASI subfolders, i.e.,	"python3 manage_iasi.py 14".
+	pixels will be saved. Call this script via "python3 manage_iasi.py" or append an int as index
+	of the IASI subfolders, i.e., "python3 manage_iasi.py 14". Subfolders may be useful to split
+	the IASI data into smaller packages to be more managable (i.e., 5 days per subfolder).
 	- import data (iasi, polarstern track)
 	- find spatio-temporal overlap
 	- export IASI data to file
@@ -26,13 +28,14 @@ import pdb
 
 
 # paths:
-path_data = {	'iasi': "/mnt/f/heavy_data/IASI/",		# subfolders may exist
+path_data = {	'iasi': "/mnt/f/heavy_data/IASI/mosaic/new/",		# subfolders may exist
 				'ps_track': "/mnt/f/heavy_data/polarstern_track/"}
-path_output = "/mnt/f/heavy_data/IASI_mosaic/"
+path_output = "/mnt/f/heavy_data/IASI/mosaic_step1/"
 
 # additional settings:
 set_dict = {'max_dist': 50.0,							# max distance in km
-			}
+			'subfolders': True,							# set this True if IASI data is hidden in 
+			}											# subfolders of path_data['iasi']
 
 path_output_dir = os.path.dirname(path_output)
 if not os.path.exists(path_output_dir):
@@ -40,29 +43,38 @@ if not os.path.exists(path_output_dir):
 
 
 # import polarstern track:
-files = sorted(glob.glob(path_data['ps_track'] + "PS122_3_link-to-mastertrack_V2.nc"))
-PS_DS = import_PS_mastertrack(files, return_DS=True)
+files = sorted(glob.glob(path_data['ps_track'] + "PS122*.nc"))
+PS_DS_master = import_PS_mastertrack(files, return_DS=True)
 
 
 # import iasi data: consider each subfolder step by step:
 # chose subfolder of IASI data if given in the system arguments:
-subfolders = sorted(glob.glob(path_data['iasi'] + "*"))
-if len(sys.argv) == 2:
-	subfolders = subfolders[int(sys.argv[1]):int(sys.argv[1])+1]
+if set_dict['subfolders']:
+	subfolders = sorted(glob.glob(path_data['iasi'] + "*"))
+	if len(sys.argv) == 2:
+		subfolders = subfolders[int(sys.argv[1]):int(sys.argv[1])+1]
+else:
+	subfolders = [path_data['iasi']]
+
 
 for idx_folder, subfolder in enumerate(subfolders):
+	print(f"Processing data in {subfolder}/")
 
 	# loop through subfolders
 	files = sorted(glob.glob(subfolder + "/*.nc"))
 	IASI_DS = import_iasi_nc(files)
 
-	# adapt PS_DS time range according to IASI swath times:
+	# adapt PS_DS time range according to IASI swath times: Expand beyond 00:00 and 23:59 UTC of a day 
+	# to capture orbits that started today, but ended early the next day.
 	min_time_iasi = IASI_DS.record_start_time.values.min()
 	max_time_iasi = IASI_DS.record_stop_time.values.max()
-	PS_DS = PS_DS.sel(time=slice(min_time_iasi-np.timedelta64(7200,"s"), max_time_iasi+np.timedelta64(7200,"s")))
+	PS_DS = PS_DS_master.sel(time=slice(min_time_iasi-np.timedelta64(7200,"s"), max_time_iasi+np.timedelta64(7200,"s")))
 
 	# half of max temporal diff of PS track time as threshold for IASI time overlap:
-	set_dict['max_dt'] = np.max(np.diff(PS_DS.time.values)).astype("timedelta64[s]")*0.5
+	try:
+		set_dict['max_dt'] = np.max(np.diff(PS_DS.time.values)).astype("timedelta64[s]")*0.5
+	except ValueError:
+		pdb.set_trace()
 	if set_dict['max_dt'] > np.timedelta64(1800, "s"):
 		set_dict['max_dt'] = np.timedelta64(1800, "s")
 
@@ -115,7 +127,10 @@ for idx_folder, subfolder in enumerate(subfolders):
 	IASI_2d_shape = IASI_DS.lat.shape
 	for k, ps_time in enumerate(PS_DS.time.values):
 
-		if k%10 == 0: print(f"{k} of {n_time_ps_track}")
+		n_hatches = round(30*k/n_time_ps_track)
+		n_remain = 30 - n_hatches
+		print("\rLooping over Polarstern track time: [", "#"*n_hatches, ' '*n_remain, ']', f" {round(100.*k/n_time_ps_track)} %", 
+				sep='', end='', flush=True)
 
 		# first, finde indices of IASI_DS that are within the spatial distance defined
 		# in the settings:
@@ -164,6 +179,7 @@ for idx_folder, subfolder in enumerate(subfolders):
 				else:
 					iasi_ps_dict[key][k,:n_iasi_left] = IASI_DS[key].values.ravel()[iasi_time_space_mask]
 
+	print("")
 
 	# save data dict to xarray dataset, then to netCDF:
 	IASI_PS_DS = xr.Dataset(coords={'time': (['time'], PS_DS.time.values),
@@ -198,15 +214,15 @@ for idx_folder, subfolder in enumerate(subfolders):
 	IASI_PS_DS.attrs['processed_by'] = "Andreas Walbroel (a.walbroel@uni-koeln.de), Institute for Geophysics and Meteorology, University of Cologne, Cologne, Germany"
 	IASI_PS_DS.attrs['comments'] = (f"The processing ensures a temporal overlap of {set_dict['max_dist']} km and temporal " +
 									f"accuracy of at least {set_dict['max_dt']}. For a given Polarstern track time stamp, " +
-									"the existence of a spatial overlap is inquired. If spatial overlap has been detected, temporal overlap is tested. " +
-									"If temporal overlap has been identified, all pixels fulfilling the spatio-temporal overlap constraints will be saved " +
-									"to that Polarstern track time stamp. Afterwards, these detected pixels are excluded from further overlap search. " +
-									f"Note that there might be a time difference up to {set_dict['max_dt']} between Polarstern track time " +
+									"the existence of a spatial overlap is checked. If a spatial overlap is detected, the temporal overlap is checked. " +
+									"If temporal overlap is detected, all pixels fulfilling the spatio-temporal overlap conditions will be saved " +
+									"for that Polarstern track time stamp. These detected pixels are then excluded from further overlap searches. " +
+									f"Note that there may be a time difference of up to {set_dict['max_dt']} between the Polarstern track time " +
 									"(main time axis of this dataset) and IASI (record_start_time + record_stop_time)*0.5.")
 	IASI_PS_DS.attrs['conventions'] = "CF-1.7"
 	IASI_PS_DS.attrs['python_version'] = f"python version: {sys.version}"
 	IASI_PS_DS.attrs['python_packages'] = (f"numpy: {np.__version__}, xarray: {xr.__version__}, " +
-											f"geopy: {geopy.__version__}")
+											f"geopy: {geopy.__version__}, pandas: {pd.__version__}")
 
 
 	# further attributes:
@@ -226,9 +242,9 @@ for idx_folder, subfolder in enumerate(subfolders):
 
 	# Limit dataset to data-only time steps:
 	IASI_PS_DS = IASI_PS_DS.isel(time=(~np.isnan(IASI_PS_DS.lat.values[:,0])))
-
-	IASI_PS_DS.to_netcdf(path_output + f"MOSAiC_IASI_Polarstern_overlap_step1_{int(sys.argv[1]):02}.nc", mode='w', format='NETCDF4')
+	IASI_PS_DS.to_netcdf(path_output + f"MOSAiC_IASI_Polarstern_overlap_step1_{subfolder[-10:]}.nc", mode='w', format='NETCDF4')
 	IASI_PS_DS.close()
 
 	# clear memory:
-	del IASI_PS_DS
+	PS_DS.close()
+	del IASI_PS_DS, PS_DS

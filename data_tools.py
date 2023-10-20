@@ -2,6 +2,7 @@ import numpy as np
 import copy
 import datetime as dt
 import xarray as xr
+import pandas as pd
 import os
 import glob
 import pdb
@@ -112,6 +113,32 @@ def running_mean_datetime(x, N, t):
 		x_m[k] = np.mean(x[rm_range])
 	
 	return x_m
+
+
+def running_mean_pdtime(x, N, t):
+	"""
+	Running mean of a 1D array x with a window width of N seconds.
+
+	Parameters:
+	-----------
+	x : array of floats
+		1D data vector of which the running mean is to be taken.
+	N : int
+		Running mean window width in seconds.
+	t : array of floats
+		1D time vector (in numpy datetim64[ns]) required to
+		compute the actual running mean window width.
+	"""
+
+	# first, create xarray DataArray and convert it to pandas DataFrame:
+	x_DA = xr.DataArray(x, dims=['time'], coords={'time': (['time'], t)})
+	x_DF = x_DA.to_dataframe(name='x')
+
+	# compute running mean (rolling mean): center=True is recommended to have a 5-min running
+	# at 2020-01-01T14:00:00 from 2020-01-01T13:57:30 until 2020-01-01T14:02:30.
+	x_rm = x_DF.rolling(f"{int(N)}S", center=True).mean().to_xarray().x
+
+	return x_rm.values
 
 
 def running_mean_time_2D(x, N, t, axis=0):
@@ -504,7 +531,7 @@ def regression(
 
 	# compute m_est
 	K_reg_T = K_reg.T
-	m_est = np.linalg.inv(K_reg_T.dot(K_reg)).dot(K_reg_T).dot(x)
+	m_est = np.linalg.inv(K_reg_T@K_reg)@K_reg_T@x
 
 	return m_est
 
@@ -697,7 +724,8 @@ def select_MWR_channels(
 	Parameters:
 	-----------
 	TB : array of floats
-		2D array (i.e., time x freq; freq must be the second dimension) of TBs (in K).
+		2D array (i.e., time x freq; freq must be the second dimension) or higher dimensional
+		array (where freq must be on axis -1) of TBs (in K).
 	freq : array of floats
 		1D array of frequencies (in GHz).
 	band : str
@@ -730,7 +758,7 @@ def select_MWR_channels(
 
 	# sort the list and select TBs:
 	frq_idx = sorted(frq_idx)
-	TB = TB[:, frq_idx]
+	TB = TB[..., frq_idx]
 	freq = freq[frq_idx]
 
 	if return_idx == 0:
@@ -891,95 +919,6 @@ def vector_intersection_2d(
 	return mm, nn
 
 
-def filter_clear_sky_sondes_cloudnet(
-	sonde_time,
-	cn_time,
-	cn_is_clear_sky,
-	threshold=1.0,
-	window=0):
-
-	"""
-	Find radiosonde launches that occur in clear sky scenes using cloudnet data. Before
-	this function is run, the function cloudnet.clear_sky_only must have been executed
-	already to provide a mask if time stamps are cloudy or not (cn_is_clear_sky).
-
-	Only those sondes will be considered clear sky if all cloudnet time stamps in the
-	time range 'sonde launch:sonde launch + window' are clear sky (cn_is_clear_sky = True).
-	The function will return a mask (array of boolean type) indicating if a sonde fulfills
-	the requirement.
-
-	sonde_time and cn_time must have the same units!
-
-	Parameters:
-	-----------
-	sonde_time : 1D array of int or float
-		Launch time of radiosondes (preferably in sec since 1970-01-01 00:00:00 UTC).
-	cn_time : 1D array of int or float
-		Cloudnet time stamps (preferably in sec since 1970-01-01 00:00:00 UTC). Must have
-		the same units as sonde_time!
-	cn_is_clear_sky : 1D array of bool
-		Cloudnet clear sky mask on the cloudnet time axis. Output of cloudnet.clear_sky_only.
-	threshold : int
-		Threshold of the fraction of cloudnet time stamps that must be 'clear sky' between
-		sonde_time and sonde_time + window. Values between 0.95 and 1.0 are recommended.
-		0.95 is more permitting (e.g. some more cloudnet noise can be neglected with that
-		setting) while 1.0 requires exactly all cloudnet time stamps to be 'clear sky'.
-		'clear sky' means that according to cloudnet target classification, it is clear sky,
-		aerosols, insects or aerosols & insects. Additionally, some noisy pixels are filtered
-		out (see my_classes.py -> class cloudnet -> clear_sky_only).
-	window : int or float
-		Time (in seconds) after sonde launch that is also considered for finding the clear
-		sky sondes. Must be >= 0.
-	"""
-
-	if window < 0:
-		raise ValueError("Argument 'window' must be >= 0 (int or float).")
-
-	sonde_time_shape = sonde_time.shape
-	t_mask = np.full(sonde_time_shape, False)	# initialise mask
-
-	if np.any(cn_is_clear_sky):		# then we have at least got one clear sky scene
-		for k, st in enumerate(sonde_time):
-			c_idx = np.where((cn_time >= st) & (cn_time <= st + window))[0]
-			n_c_idx = len(c_idx)
-			if n_c_idx > 0:	# then it isn't empty: check, if all cn_time found are clear sky
-				cn_all_clear_sky = np.count_nonzero(cn_is_clear_sky[c_idx])/n_c_idx >= threshold
-				if cn_all_clear_sky:
-					t_mask[k] = True
-
-			else:
-				cn_all_clear_sky = False
-
-	return t_mask
-
-
-def pam_out_drop_useless_dims(DS):
-
-	"""
-	Preprocessing the PAMTRA output file dataset before concatenation.
-	Removing undesired dimensions (average over polarisation, use zenith only,
-	remove y dimension). Additionally, it adds another variable (DataArray)
-	containing the datatime in sec since epochtime.
-
-	Parameters:
-	-----------
-	ds : xarray dataset
-		Dataset of the PAMTRA output.
-	"""
-
-	# Zenith only ("-1"): PAMTRA angles is relative to ZENITH
-	# Average over polarisation (".mean(axis=-1)")
-	# Remove redundant dimensions: ("0,0")
-	DS['tb'] = DS.tb[:,0,0,-1,:,:].mean(axis=-1)
-
-	# And add a variable giving the datatime in seconds since 1970-01-01 00:00:00 UTC
-	# along dimension grid_x:
-	DS['time'] = xr.DataArray(numpydatetime64_to_epochtime(DS.datatime[:,0].values),
-								dims=['grid_x'])
-
-	return DS
-
-
 def syn_MWR_cut_useless_variables_TB(DS):
 
 	"""
@@ -1114,6 +1053,225 @@ def sigmoid(x):
 		Input vector, array or number.
 	"""
 	return 1 / (1 + np.exp(-x))
+
+
+def offset_lwp_old(
+	time,
+	LWP,
+	lwp_std_thres=0.002):
+
+	"""
+	For zenith LWP, a clear sky offset is corrected for every 20-min interval of a day. The 20-min
+	interval is considered clear sky, if all 2-min intervals show LWP std dev < a LWP std dev 
+	threshold (lwp_std_thres; often e.g., 0.001 - 0.002 kg m-2).
+
+	Parameters:
+	time : array of floats
+		Array containing the time steps (in seconds since 1970-01-01 00:00:00 UTC) of the LWP.
+	LWP : array of floats
+		Array of Liquid Water Path (LWP, in kg m-2), which is supposed to be corrected.
+	lwp_std_thres : float
+		Liquid Water Path standard deviation threshold (in kg m-2) for the 2-min intervals. If 
+		LWP std dev is above this threshold for at least 2-min interval in a 20-min interval, the 
+		20-min interval is considered cloudy. The threshold depends on the climate of the location
+		and the instrument.
+	"""
+
+	time_npdt = time.astype('datetime64[s]')
+
+	# identify dates in the time array and loop over the dates:
+	time_date = np.unique(time_npdt.astype('datetime64[D]'))
+	time_str = time_date.astype('str')
+
+	# loop over dates:
+	LWP_cor = np.full_like(LWP, np.nan)		# will contain the corrected LWP for all days
+	idx_lwp_cor = 0							# helps to build LWP_cor with all c_LWP_cor
+	for i_c, c_date in enumerate(time_date):
+
+		# limit time and LWP to current date:
+		c_idx = np.where((time_npdt >= c_date) & (time_npdt < c_date + np.timedelta64(1, "D")))[0]
+		c_time = time[c_idx]
+		c_time_npdt = time_npdt[c_idx]
+		c_LWP = LWP[c_idx]
+		c_time_npdt_00 = np.datetime64(time_str[i_c] + "T00:00:00")
+		c_time_00 = c_time_npdt_00.astype('datetime64[s]').astype(np.float64)
+		c_LWP_cor = np.full_like(c_LWP, np.nan)		# will contain the corrected LWP for a day
+
+
+		# create arrays for clear sky 20-min intervals of a day:
+		n_twe = 73		# number of 20-min intervals in a day
+		lwp_off = np.array([])		# will contain the average LWP of each clear sky 20-min interval
+		time_off = np.array([])		# corresponding time (lower bound of the interval) of the clear sky 20-min interval(s)
+
+		# loop over 20-min intervals and check if cloudy or clear sky:
+		for i in range(n_twe-1):
+			n_std = 0
+			clear = 0
+			cloudy = 0
+			lwp_off_x = np.array([])		# 2-min interval LWP in clear sky conditions
+
+			# loop over 2-min intervals:
+			for j in range(10):
+				# identify indices for the current 2-min interval:
+				i_two = np.where((c_time >= c_time_00 + i*1200 + j*120) & (c_time < c_time_00 + i*1200 + (j+1)*120))[0]
+
+
+				# identify cloud state:
+				n_i_two = len(i_two)
+				if n_i_two >= 30: 	# then, sufficient amount of data has been found for std dev in the 2-min interval
+					lwp_std = np.std(c_LWP[i_two])
+
+					if lwp_std >= lwp_std_thres:
+						cloudy = 1
+					else:
+						clear = 1
+
+						# save lwp in clear sky scenes to lwp_off_x:
+						if len(lwp_off_x) == 0:
+							lwp_off_x = c_LWP[i_two]
+						else:
+							lwp_off_x = np.concatenate((lwp_off_x, c_LWP[i_two]), axis=0)
+
+					n_std += 1
+
+			# take average of LWP over the 20-min interval 
+			if clear == 1 and cloudy == 0:	# then, 'cloudy' has never occured in the 20 min interval
+				if len(lwp_off) == 0:
+					lwp_off = np.array([np.mean(lwp_off_x)])
+					time_off = np.array([c_time_00 + i*1200 + 600])
+
+				else:
+					lwp_off = np.concatenate((lwp_off, np.array([np.mean(lwp_off_x)])))
+					time_off = np.concatenate((time_off, np.array([c_time_00 + i*1200 + 600])))
+
+
+		# loop over LWP values:
+		n_lwp = len(c_LWP)
+		for i in range(n_lwp):
+			# search for offsets around time:
+			ii_high = np.where(time_off >= c_time[i])[0]
+			ii_low = np.where(time_off < c_time[i])[0]
+			ii_closest = np.argmin(np.abs(time_off - c_time[i]))					######################################### needs correction in case no clear sky scene was found
+
+			# interpolate offset if offsets are available before (ii_low) and after (ii_high) time[i]:
+			if len(ii_high) > 0 and len(ii_low) > 0:
+				s_lope = (lwp_off[ii_low[-1]] - lwp_off[ii_high[0]]) / (time_off[ii_low[-1]] - time_off[ii_high[0]])
+				offset = s_lope*(c_time[i] - time_off[ii_low[-1]]) + lwp_off[ii_low[-1]]
+			else:	# you can use the nearest LWP offset:
+				offset = lwp_off[ii_closest]
+			# pdb.set_trace()
+			c_LWP_cor[i] = c_LWP[i] - offset
+
+		# save corrected LWP of the current day to LWP_cor:
+		LWP_cor[idx_lwp_cor:idx_lwp_cor+n_lwp] = c_LWP_cor
+		idx_lwp_cor += n_lwp
+
+	return LWP_cor
+
+
+def offset_lwp(
+	time,
+	LWP,
+	lwp_std_thres=0.002):
+
+	"""
+	For zenith LWP, a clear sky offset is corrected for every 20-min interval of a day. The 20-min
+	interval is considered clear sky, if all 2-min intervals show LWP std dev < a LWP std dev 
+	threshold (lwp_std_thres; often e.g., 0.001 - 0.002 kg m-2).
+
+	Parameters:
+	time : array of floats
+		Array containing the time steps (in seconds since 1970-01-01 00:00:00 UTC) of the LWP.
+	LWP : array of floats
+		Array of Liquid Water Path (LWP, in kg m-2), which is supposed to be corrected.
+	lwp_std_thres : float
+		Liquid Water Path standard deviation threshold (in kg m-2) for the 2-min intervals. If 
+		LWP std dev is above this threshold for at least 2-min interval in a 20-min interval, the 
+		20-min interval is considered cloudy. The threshold depends on the climate of the location
+		and the instrument.
+	"""
+
+	time_npdt = time.astype('datetime64[s]')
+
+	LWP_cor = np.full_like(LWP, np.nan)		# will contain the corrected LWP for all days
+	LWP_off = np.full_like(LWP, np.nan)		# will contain 20-min mean of LWP in clear sky tiem steps
+	cloudy_idx = np.zeros_like(LWP)			# == 0 for clear sky, == 1 for cloudy scenes
+
+
+	# identify clear sky scenes with 2-min-LWP-std-dev. If all of these within a 20-min 
+	# interval are below the LWP std dev threshold, clear sky is assumed:
+	# Need xarray DataArrays for functionalities:
+	LWP_DA = xr.DataArray(LWP, dims=['time'], coords={'time': time_npdt})
+
+	LWP_DF = LWP_DA.to_dataframe(name='LWP')	# PANDAS DF to be used to have rolling window width in time units
+	LWP_std_2min = LWP_DF.rolling("2min", center=True, min_periods=30).std()
+	LWP_std_max_20min = LWP_std_2min.rolling("20min", center=True).max().to_xarray().LWP
+	LWP_off = LWP_DF.rolling("20min", center=True).mean().to_xarray().LWP	# mean LWP over 20 minutes <-> serves as offset in clear sky
+
+	idx_cloudy = np.where(LWP_std_max_20min >= lwp_std_thres)[0]
+	cloudy_idx[idx_cloudy] = 1.0
+	idx_clear_sky = np.where(cloudy_idx == 0)[0]
+	LWP_off[idx_cloudy] = np.nan
+
+	# LWP offsets for cloudy time steps are computed by interpolating from adjacent clear sky periods:
+	max_gap_val = np.timedelta64(6, "h")
+	LWP_off = LWP_off.interpolate_na(dim='time', method='linear', max_gap=max_gap_val, fill_value=0.0)
+
+	# handle potential nans that still exist because max_gap and fill_value don't work together:
+	# Causes of nans: cloudy scenes, measurement gaps. The following cases still need to be covered:
+	# 1. Cloudy after measurement gap: take LWP_off of first clear sky scene after measurement gap
+	# 2. Cloudy for longer period than max_gap: just expand interpolation
+	# 3. Cloudy before measurement gap: take the LWP_off of the latest clear sky scene before the gap
+	still_nan = np.isnan(LWP_off.values)
+	if np.all(still_nan): 
+		LWP_off[:] = 0.0	# otherwise, LWP_cor is also nan
+
+	# handle measurement gaps: identify via time differences larger than max_gap_val. If shorter
+	# measurement gaps are seen, it's considered that the interpolation does a decent job.
+	meas_gaps = np.where(np.diff(time_npdt) > max_gap_val)[0]
+
+	# check sky state around measurement gaps:
+	for meas_gap in meas_gaps:
+		# meas_gap + 1 == first value after measurement gap
+		if meas_gap > 0:
+			cloudy_before = np.isnan(LWP_off[meas_gap].values)
+			cloudy_after = np.isnan(LWP_off[meas_gap+1].values)
+
+			if cloudy_before:	# take latest LWP_off
+				idx_last_clear_sky = np.where(cloudy_idx[:meas_gap+1] == 0)[0]
+				if len(idx_last_clear_sky) > 0:
+					idx_last_clear_sky = idx_last_clear_sky[-1]
+
+					# check if temporal distance is okay:
+					if (time_npdt[meas_gap] - time_npdt[idx_last_clear_sky]) <= np.timedelta64(72, "h"):
+						LWP_off[idx_last_clear_sky+1:meas_gap+1] = LWP_off[idx_last_clear_sky]
+
+			if cloudy_after:	# take first LWP_off
+				idx_first_clear_sky = np.where(cloudy_idx[meas_gap+1:] == 0)[0] + meas_gap + 1
+				if len(idx_first_clear_sky) > 0:
+					idx_first_clear_sky = idx_first_clear_sky[0]
+
+					# check if temporal distance is okay:
+					if (time_npdt[idx_first_clear_sky] - time_npdt[meas_gap+1]) <= np.timedelta64(72, "h"):
+						LWP_off[meas_gap+1:idx_first_clear_sky] = LWP_off[idx_first_clear_sky]
+
+
+	# take care of the array boundaries similar as the measurement gaps if the temporal distance
+	# to the clear sky scene isn't too far away:
+	if np.isnan(LWP_off[0].values) and ((time_npdt[idx_clear_sky[0]] - time_npdt[0]) < np.timedelta64(72, "h")):
+		LWP_off[:idx_clear_sky[0]] = LWP_off[idx_clear_sky[0]]
+	if np.isnan(LWP_off[-1].values) and((time_npdt[-1] - time_npdt[idx_clear_sky[-1]]) < np.timedelta64(72, "h")):
+		LWP_off[idx_clear_sky[-1]+1:] = LWP_off[idx_clear_sky[-1]]
+
+	# interpolate over longer cloudy periods and set remaining nans to 0:
+	LWP_off = LWP_off.interpolate_na(dim='time', method='linear', max_gap=np.timedelta64(72, "h"))
+	LWP_off[np.isnan(LWP_off)] = 0.0
+			
+
+	# correct LWP and save it to LWP_cor:
+	LWP_cor = LWP - LWP_off
+
+	return LWP_cor
 
 
 def save_concat_IWV(

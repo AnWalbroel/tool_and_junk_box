@@ -1861,6 +1861,193 @@ def import_hatpro_level1b_daterange(
 	return mwr_master_dict
 
 
+def import_hatpro_level1b_daterange_pangaea(
+	path_data,
+	date_start,
+	date_end=None):
+
+	"""
+	Runs through all days between a start and an end date. It concats the level 1b TB time
+	series of each day so that you'll have one dictionary, whose 'TB' will contain the TB
+	for the entire date range period.
+
+	Parameters:
+	-----------
+	path_data : str
+		Path of level 1 (brightness temperature, TB) data. This directory contains daily files
+		as netCDF.
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case.
+	date_end : str or None
+		If date_start is str: Marks the last day of the desired period. To be specified in 
+		yyyy-mm-dd (e.g. 2021-01-14)!
+	"""
+
+	def cut_vars(DS):
+		DS = DS.drop_vars(['freq_sb', 'freq_shift', 'tb_absolute_accuracy', 'tb_cov'])
+		return DS
+
+
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
+	elif type(date_start) == type([]) and date_end:
+		raise ValueError("'date_end' should be none if 'date_start' is a list of strings.")
+
+
+	# Identify files in the date range: First, load all into a list, then check which ones 
+	# suit the daterange:
+	mwr_dict = dict()
+	sub_str = "_v01_"
+	l_sub_str = len(sub_str)
+	files = sorted(glob.glob(path_data + "ioppol_tro_mwr00_l1_tb_v01_*.nc"))
+
+
+	if type(date_start) == type(""):
+		# extract day, month and year from start date:
+		date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+		date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date >= date_start and file_date <= date_end:
+				files_filtered.append(file)
+	else:
+		# extract day, month and year from date_start:
+		date_list = [dt.datetime.strptime(ddd, "%Y-%m-%d") for ddd in date_start]
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date in date_list:
+				files_filtered.append(file)
+
+
+	# load data:
+	DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested', preprocess=cut_vars)
+	interesting_vars = ['time', 'flag', 'ta', 'pa', 'hur', 'tb', 'tb_bias_estimate', 'freq_sb', 'freq_shift',
+						'tb_absolute_accuracy', 'tb_cov']
+	for vava in interesting_vars:
+		if vava not in ['freq_sb', 'freq_shift', 'tb_absolute_accuracy', 'tb_cov']:
+			mwr_dict[vava] = DS[vava].values.astype(np.float64)
+
+	mwr_dict['flag'][np.isnan(mwr_dict['flag'])] = 0.
+	mwr_dict['time'] = np.rint(mwr_dict['time']).astype(float)
+	DS.close()
+
+	DS = xr.open_dataset(files_filtered[0], decode_times=False)
+	mwr_dict['freq_sb'] = DS.freq_sb.values.astype(np.float32)
+	mwr_dict['freq_shift'] = DS.freq_shift.values.astype(np.float32)
+	mwr_dict['tb_absolute_accuracy'] = DS.tb_absolute_accuracy.values.astype(np.float32)
+	mwr_dict['tb_cov'] = DS.tb_cov.values.astype(np.float32)
+
+	DS.close()
+	del DS
+
+	return mwr_dict
+
+
+def import_hatpro_level1c_daterange_pangaea(
+	path_data,
+	date_start,
+	date_end=None):
+
+	"""
+	Runs through all days between a start and an end date. It concats the level 1c TB time
+	series of each day so that you'll have one dictionary, whose 'TB' will contain the TB
+	for the entire date range period.
+
+	Parameters:
+	-----------
+	path_data : str
+		Path of level 1 (brightness temperature, TB) data. This directory contains daily files
+		as netCDF.
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case.
+	date_end : str or None
+		If date_start is str: Marks the last day of the desired period. To be specified in 
+		yyyy-mm-dd (e.g. 2021-01-14)!
+	"""
+
+	def cut_vars(DS):
+		DS = DS.drop_vars(['freq_sb', 'freq_shift', 'tb_absolute_accuracy', 'tb_cov', 'ele'])
+		return DS
+
+
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
+	elif type(date_start) == type([]) and date_end:
+		raise ValueError("'date_end' should be none if 'date_start' is a list of strings.")
+
+
+	# Identify files in the date range: First, load all into a list, then check which ones 
+	# suit the daterange:
+	mwr_dict = dict()
+	sub_str = "_v01_"
+	l_sub_str = len(sub_str)
+	files = sorted(glob.glob(path_data + "ioppol_tro_mwrBL00_l1_tb_v01_*.nc"))
+
+
+	if type(date_start) == type(""):
+		# extract day, month and year from start date:
+		date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+		date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date >= date_start and file_date <= date_end:
+				files_filtered.append(file)
+	else:
+		# extract day, month and year from date_start:
+		date_list = [dt.datetime.strptime(ddd, "%Y-%m-%d") for ddd in date_start]
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date in date_list:
+				files_filtered.append(file)
+
+
+	# load data:
+	DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested', preprocess=cut_vars)
+	interesting_vars = ['time', 'flag', 'tb', 'freq_sb', 'ele']
+	for vava in interesting_vars:
+		if vava in DS.variables:
+			mwr_dict[vava] = DS[vava].values.astype(np.float64)
+
+	mwr_dict['flag'][np.isnan(mwr_dict['flag'])] = 0.
+	mwr_dict['time'] = np.rint(mwr_dict['time']).astype(float)
+	DS.close()
+
+	DS = xr.open_dataset(files_filtered[0], decode_times=False)
+	mwr_dict['freq_sb'] = DS.freq_sb.values.astype(np.float32)
+	mwr_dict['ele'] = DS.ele.values.astype(np.float32)
+
+	DS.close()
+	del DS
+
+	return mwr_dict
+
+
 def import_hatpro_level2a_daterange(
 	path_data,
 	date_start,
@@ -1957,14 +2144,12 @@ def import_hatpro_level2a_daterange(
 
 		if 'prw' in which_retrieval:
 			mwr_master_dict['prw'] = np.full((n_minutes,), np.nan)
-			mwr_master_dict['prw_offset'] = np.full((n_minutes,), np.nan)							####### could be reduced to a daily value or even one value for the entire period
-			# mwr_master_dict['prw_err'] = np.full((n_days, n_ret), np.nan)								####### could be reduced to one value array for the entire period
+			mwr_master_dict['prw_offset'] = np.full((n_minutes,), np.nan)
 			mwr_master_dict['prw_err'] = np.full((n_ret,), np.nan)
 
 		if 'clwvi' in which_retrieval:
 			mwr_master_dict['clwvi'] = np.full((n_minutes,), np.nan)
-			mwr_master_dict['clwvi_offset'] = np.full((n_minutes,), np.nan)							####### could be reduced to a daily value or even one value for the entire period
-			# mwr_master_dict['clwvi_err'] = np.full((n_days, n_ret), np.nan)								###### could be reduced to one value for the entire period
+			mwr_master_dict['clwvi_offset'] = np.full((n_minutes,), np.nan)
 			mwr_master_dict['clwvi_err'] = np.full((n_ret,), np.nan)
 
 	else:			# max number of seconds: n_days*86400
@@ -1973,14 +2158,12 @@ def import_hatpro_level2a_daterange(
 
 		if 'prw' in which_retrieval:
 			mwr_master_dict['prw'] = np.full((n_seconds,), np.nan)
-			mwr_master_dict['prw_offset'] = np.full((n_seconds,), np.nan)							####### could be reduced to a daily value or even one value for the entire period
-			# mwr_master_dict['prw_err'] = np.full((n_days, n_ret), np.nan)								####### could be reduced to one value array for the entire period
+			mwr_master_dict['prw_offset'] = np.full((n_seconds,), np.nan)
 			mwr_master_dict['prw_err'] = np.full((n_ret,), np.nan)
 
 		if 'clwvi' in which_retrieval:
 			mwr_master_dict['clwvi'] = np.full((n_seconds,), np.nan)
-			mwr_master_dict['clwvi_offset'] = np.full((n_seconds,), np.nan)							####### could be reduced to a daily value or even one value for the entire period
-			# mwr_master_dict['clwvi_err'] = np.full((n_days, n_ret), np.nan)								###### could be reduced to one value for the entire period
+			mwr_master_dict['clwvi_offset'] = np.full((n_seconds,), np.nan)
 			mwr_master_dict['clwvi_err'] = np.full((n_ret,), np.nan)
 
 
@@ -2706,7 +2889,7 @@ def import_hatpro_level2c_daterange(
 def import_hatpro_level2a_daterange_pangaea(
 	path_data,
 	date_start,
-	date_end,
+	date_end=None,
 	which_retrieval='both'):
 
 	"""
@@ -2718,8 +2901,10 @@ def import_hatpro_level2a_daterange_pangaea(
 	-----------
 	path_data : str
 		Path of level 2a data. 
-	date_start : str
-		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case.
 	date_end : str
 		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
 	which_retrieval : str, optional
@@ -2727,6 +2912,13 @@ def import_hatpro_level2a_daterange_pangaea(
 		integrated water vapour. 'lwp' or 'clwvi' will load the liquid water path. 'both' will 
 		load both. Default: 'both'
 	"""
+
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
+	elif type(date_start) == type([]) and date_end:
+		raise ValueError("'date_end' should be none if 'date_start' is a list of strings.")
+
 
 	# check if the input of the retrieval variable is okay:
 	if not isinstance(which_retrieval, str):
@@ -2754,10 +2946,6 @@ def import_hatpro_level2a_daterange_pangaea(
 						"'both' will load both. Default: 'both'")
 					
 
-	# extract day, month and year from start date:
-	date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
-	date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
-
 	# Identify files in the date range: First, load all into a list, then check
 	# which ones suit the daterange:
 	mwr_dict = dict()
@@ -2766,13 +2954,31 @@ def import_hatpro_level2a_daterange_pangaea(
 	if 'prw' in which_retrieval:
 		files = sorted(glob.glob(path_data + "ioppol_tro_mwr00_l2_prw_v01_*.nc"))
 
-		# run through list: identify where date is written and check if within date range:
-		files_filtered = list()
-		for file in files:
-			ww = file.find(sub_str) + l_sub_str
-			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
-			if file_date >= date_start and file_date <= date_end:
-				files_filtered.append(file)
+		if type(date_start) == type(""):
+			# extract day, month and year from start date:
+			date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+			date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+			# run through list: identify where date is written and check if within date range:
+			files_filtered = list()
+			for file in files:
+				ww = file.find(sub_str) + l_sub_str
+				if file.find(sub_str) == -1: continue
+				file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+				if file_date >= date_start and file_date <= date_end:
+					files_filtered.append(file)
+		else:
+			# extract day, month and year from date_start:
+			date_list = [dt.datetime.strptime(ddd, "%Y-%m-%d") for ddd in date_start]
+
+			# run through list: identify where date is written and check if within date range:
+			files_filtered = list()
+			for file in files:
+				ww = file.find(sub_str) + l_sub_str
+				if file.find(sub_str) == -1: continue
+				file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+				if file_date in date_list:
+					files_filtered.append(file)
 
 
 		# laod data:
@@ -2790,19 +2996,37 @@ def import_hatpro_level2a_daterange_pangaea(
 	if 'clwvi' in which_retrieval:
 		files = sorted(glob.glob(path_data + "ioppol_tro_mwr00_l2_clwvi_v01_*.nc"))
 
-		# run through list: identify where date is written and check if within date range:
-		files_filtered = list()
-		for file in files:
-			ww = file.find(sub_str) + l_sub_str
-			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
-			if file_date >= date_start and file_date <= date_end:
-				files_filtered.append(file)
+		if type(date_start) == type(""):
+			# extract day, month and year from start date:
+			date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+			date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+			# run through list: identify where date is written and check if within date range:
+			files_filtered = list()
+			for file in files:
+				ww = file.find(sub_str) + l_sub_str
+				if file.find(sub_str) == -1: continue
+				file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+				if file_date >= date_start and file_date <= date_end:
+					files_filtered.append(file)
+		else:
+			# extract day, month and year from date_start:
+			date_list = [dt.datetime.strptime(ddd, "%Y-%m-%d") for ddd in date_start]
+
+			# run through list: identify where date is written and check if within date range:
+			files_filtered = list()
+			for file in files:
+				ww = file.find(sub_str) + l_sub_str
+				if file.find(sub_str) == -1: continue
+				file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+				if file_date in date_list:
+					files_filtered.append(file)
 
 
 		# load data:
 		DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested')
 		if mwr_dict:
-			interesting_vars = ['flag', 'clwvi', 'clwvi_offset', 'clwvi_err']
+			interesting_vars = ['flag', 'clwvi', 'clwvi_offset_zeroing', 'clwvi_err']
 			for vava in interesting_vars:
 				if vava != 'clwvi_err':
 					mwr_dict[vava] = DS[vava].values.astype(np.float64)
@@ -2811,7 +3035,7 @@ def import_hatpro_level2a_daterange_pangaea(
 			mwr_dict['flag'][np.isnan(mwr_dict['flag'])] = 0.
 
 		else:
-			interesting_vars = ['time', 'flag', 'lat', 'lon', 'zsl', 'clwvi', 'clwvi_offset', 'clwvi_err']
+			interesting_vars = ['time', 'flag', 'lat', 'lon', 'zsl', 'clwvi', 'clwvi_offset_zeroing', 'clwvi_err']
 			for vava in interesting_vars:
 				if vava != 'clwvi_err':
 					mwr_dict[vava] = DS[vava].values.astype(np.float64)
@@ -2827,7 +3051,7 @@ def import_hatpro_level2a_daterange_pangaea(
 def import_hatpro_level2b_daterange_pangaea(
 	path_data,
 	date_start,
-	date_end,
+	date_end=None,
 	which_retrieval='both',
 	around_radiosondes=True,
 	path_radiosondes="",
@@ -2847,8 +3071,11 @@ def import_hatpro_level2b_daterange_pangaea(
 		Base path of level 2b data. This directory contains subfolders representing the year, which,
 		in turn, contain months, which contain day subfolders. Example path_data:
 		"/data/obs/campaigns/mosaic/hatpro/l2/"
-	date_start : str
-		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case. The
+		date list must be sorted in ascending order!
 	date_end : str
 		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
 	which_retrieval : str, optional
@@ -2870,6 +3097,11 @@ def import_hatpro_level2b_daterange_pangaea(
 		If 0, output is suppressed. If 1, basic output is printed. If 2, more output (more warnings,...)
 		is printed.
 	"""
+
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
+
 
 	if mwr_avg < 0:
 		raise ValueError("mwr_avg must be an int >= 0.")
@@ -2897,6 +3129,11 @@ def import_hatpro_level2b_daterange_pangaea(
 
 
 	# extract day, month and year from start date:
+	date_list = []
+	if type(date_start) == type([]): 
+		date_list = copy.deepcopy(date_start)
+		date_start = date_start[0]
+		date_list = [dt.datetime.strptime(dl, "%Y-%m-%d").date() for dl in date_list]
 	date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
 	date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
 
@@ -2912,7 +3149,7 @@ def import_hatpro_level2b_daterange_pangaea(
 	# Create an array that includes the radiosonde launch times:
 	if around_radiosondes:
 		if not path_radiosondes:
-			raise ValueError("If 'around_radiosondes' is True, the path to the radiosonde level 2 data ('pathradiosondes') " +
+			raise ValueError("If 'around_radiosondes' is True, the path to the radiosonde level 2 data ('path_radiosondes') " +
 								"must be given.")
 
 		if s_version != 'level_2':
@@ -2928,12 +3165,20 @@ def import_hatpro_level2b_daterange_pangaea(
 			n_samp = len(add_files)		# number of radiosondes
 			launch_times = np.full((n_samp,), dt.datetime(1970,1,1))
 			kk = 0
-			for a_f in add_files:
-				ltt = dt.datetime.strptime(a_f[-19:-4], "%Y%m%d_%H%M%S")
-				# only save those that are in the considered period
-				if ltt >= date_start and ltt < (date_end + dt.timedelta(days=1)):
-					launch_times[kk] = ltt
-					kk += 1
+			if date_list:	# then only consider dates within date_list
+				for a_f in add_files:
+					ltt = dt.datetime.strptime(a_f[-19:-4], "%Y%m%d_%H%M%S")
+					# only save those that are in the considered period
+					if ltt.date() in date_list:
+						launch_times[kk] = ltt
+						kk += 1
+			else:
+				for a_f in add_files:
+					ltt = dt.datetime.strptime(a_f[-19:-4], "%Y%m%d_%H%M%S")
+					# only save those that are in the considered period
+					if ltt >= date_start and ltt < (date_end + dt.timedelta(days=1)):
+						launch_times[kk] = ltt
+						kk += 1
 			
 			# truncate launch_times and convert to sec since 1970-01-01 00:00:00 UTC:
 			launch_times = launch_times[:kk]
@@ -2991,7 +3236,13 @@ def import_hatpro_level2b_daterange_pangaea(
 						# accordingly.
 	sample_time_tolerance = 900		# sample time tolerance in seconds: mwr time must be within this
 									# +/- tolerance of a sample_time to be accepted
-	for now_date in (date_start + dt.timedelta(days=n) for n in range(n_days)):
+
+
+	if not date_list:
+		date_list = (date_start + dt.timedelta(days=n) for n in range(n_days))
+	else:
+		date_list = [dt.datetime(dl_i.year, dl_i.month, dl_i.day) for dl_i in date_list]
+	for now_date in date_list:
 
 		if verbose >= 1: print("Working on HATPRO Level 2b, ", now_date)
 
@@ -3045,9 +3296,6 @@ def import_hatpro_level2b_daterange_pangaea(
 					mwr_dict[mtkab] = mwr_dict[mtkab][mwr_dict['flag'] == 0]
 			mwr_dict['flag'] = mwr_dict['flag'][mwr_dict['flag'] == 0]
 
-			# # # update the flag by taking the manually detected outliers into account:
-			# # # (not needed if v01 or later is used)
-			# mwr_dict['flag'] = outliers_per_eye(mwr_dict['flag'], mwr_dict['time'], instrument='hatpro')
 
 			# find the time slice where the mwr time is closest to the sample_times.
 			# The identified index must be within 15 minutes, otherwise it will be discarded
@@ -3067,7 +3315,6 @@ def import_hatpro_level2b_daterange_pangaea(
 					idx = np.where((mwr_dict['time'] >= st) & (mwr_dict['time'] <= st + mwr_avg))[0]
 					if len(idx) > 0:	# then an overlap has been found
 						sample_idx.append(idx)
-				sample_idx = np.asarray(sample_idx)
 				n_samp_real = len(sample_idx)	# number of samples that are valid to use; will be equal to n_samp in most cases
 
 			if n_samp_real == 0: continue
@@ -3133,6 +3380,7 @@ def import_hatpro_level2c_daterange_pangaea(
 	around_radiosondes=True,
 	path_radiosondes="",
 	s_version='level_2',
+	mwr_avg=0,
 	verbose=0):
 
 	"""
@@ -3147,8 +3395,11 @@ def import_hatpro_level2c_daterange_pangaea(
 		Base path of level 2c data. This directory contains subfolders representing the year, which,
 		in turn, contain months, which contain day subfolders. Example path_data:
 		"/data/obs/campaigns/mosaic/hatpro/l2/"
-	date_start : str
-		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case. The
+		date list must be sorted in ascending order!
 	date_end : str
 		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
 	which_retrieval : str, optional
@@ -3164,10 +3415,17 @@ def import_hatpro_level2c_daterange_pangaea(
 		Specifies the radiosonde version that is to be imported. Must be 'level_2' to work properly.
 		Other versions have not been implemeted because they are considered to be inferior to level_2
 		radiosondes.
+	mwr_avg : int, optional
+		If > 0, an average over mwr_avg seconds will be performed from sample_time - mwr_avg to 
+		sample_time + mwr_avg seconds. If == 0, no averaging will be performed.
 	verbose : int
 		If 0, output is suppressed. If 1, basic output is printed. If 2, more output (more warnings,...)
 		is printed.
 	"""
+
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
 
 	# check if the input of the retrieval variable is okay:
 	if not isinstance(which_retrieval, str):
@@ -3188,11 +3446,21 @@ def import_hatpro_level2c_daterange_pangaea(
 		level2c_dataID = level2c_dataID_dict[which_retrieval]
 		which_retrieval = which_retrieval_dict[which_retrieval]
 
+	if mwr_avg < 0:
+		raise ValueError("mwr_avg must be an int >= 0.")
+	elif type(mwr_avg) != type(1):
+		raise TypeError("mwr_avg must be int.")
+
 	# check if around_radiosondes is the right type:
 	if not isinstance(around_radiosondes, bool):
 		raise TypeError("Argument 'around_radiosondes' must be either True or False (boolean type).")
 
 	# extract day, month and year from start date:
+	date_list = []
+	if type(date_start) == type([]): 
+		date_list = copy.deepcopy(date_start)
+		date_start = date_start[0]
+		date_list = [dt.datetime.strptime(dl, "%Y-%m-%d").date() for dl in date_list]
 	date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
 	date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
 
@@ -3278,7 +3546,13 @@ def import_hatpro_level2c_daterange_pangaea(
 						# accordingly.
 	sample_time_tolerance = 1800		# sample time tolerance in seconds: mwr time must be within this
 										# +/- tolerance of a sample_time to be accepted
-	for now_date in (date_start + dt.timedelta(days=n) for n in range(n_days)):
+
+
+	if not date_list:
+		date_list = (date_start + dt.timedelta(days=n) for n in range(n_days))
+	else:
+		date_list = [dt.datetime(dl_i.year, dl_i.month, dl_i.day) for dl_i in date_list]
+	for now_date in date_list:
 
 		if verbose >= 1: print("Working on HATPRO Level 2c, ", now_date)
 
@@ -3334,25 +3608,41 @@ def import_hatpro_level2c_daterange_pangaea(
 			# # # (not needed if v01 or later is used)
 			# mwr_dict['flag'] = outliers_per_eye(mwr_dict['flag'], mwr_dict['time'], instrument='hatpro')
 
+
 			# find the time slice where the mwr time is closest to the sample_times.
-			# The identified index must be within 30 minutes, otherwise it will be discarded.
+			# The identified index must be within 15 minutes, otherwise it will be discarded
 			# Furthermore, it needs to be respected, that the flag value must be 0 for that case.
-			sample_idx = []
-			for st in sample_times_t:
-				idx = np.argmin(np.abs(mwr_dict['time'] - st))
-				if np.abs(mwr_dict['time'][idx] - st) < sample_time_tolerance:
-					sample_idx.append(idx)
-			sample_idx = np.asarray(sample_idx)
-			n_samp_real = len(sample_idx)	# number of samples that are valid to use; will be equal to n_samp in most cases
+			if mwr_avg == 0:
+				sample_idx = []
+				for st in sample_times_t:
+					idx = np.argmin(np.abs(mwr_dict['time'] - st))
+					if np.abs(mwr_dict['time'][idx] - st) < sample_time_tolerance:
+						sample_idx.append(idx)
+				sample_idx = np.asarray(sample_idx)
+				n_samp_real = len(sample_idx)	# number of samples that are valid to use; will be equal to n_samp in most cases
+
+			else:
+				sample_idx = []
+				for st in sample_times_t:
+					idx = np.where((mwr_dict['time'] >= st - mwr_avg) & (mwr_dict['time'] <= st + mwr_avg))[0]
+					if len(idx) > 0:	# then an overlap has been found
+						sample_idx.append(idx)
+				n_samp_real = len(sample_idx)	# number of samples that are valid to use; will be equal to n_samp in most cases
 
 			if n_samp_real == 0: continue
+
 
 			# save to mwr_master_dict
 			for mwr_key in mwr_dict.keys():
 				mwr_key_shape = mwr_dict[mwr_key].shape
 
 				if (mwr_key_shape == mwr_dict['time'].shape) and (mwr_key in mwr_time_keys):	# then the variable is on time axis:
-					mwr_master_dict[mwr_key][time_index:time_index + n_samp_real] = mwr_dict[mwr_key][sample_idx]
+					if mwr_avg > 0:				# these values won't be averaged because they don't contain "data"
+						sample_idx_idx = [sii[0] for sii in sample_idx]
+						mwr_master_dict[mwr_key][time_index:time_index + n_samp_real] = mwr_dict[mwr_key][sample_idx_idx]
+					
+					else:
+						mwr_master_dict[mwr_key][time_index:time_index + n_samp_real] = mwr_dict[mwr_key][sample_idx]
 
 				elif mwr_key == 'ta_err': 	# these variables are n_hgt x n_ret arrays
 					mwr_master_dict[mwr_key] = mwr_dict[mwr_key]
@@ -3361,8 +3651,11 @@ def import_hatpro_level2c_daterange_pangaea(
 					continue
 
 				elif mwr_key in mwr_time_height_keys:
-					# first: filter for non-flagged values
-					mwr_master_dict[mwr_key][time_index:time_index + n_samp_real,:] = mwr_dict[mwr_key][sample_idx,:]
+					if mwr_avg > 0:
+						for k, sii in enumerate(sample_idx):
+							mwr_master_dict[mwr_key][time_index+k:time_index+k + 1,:] = np.nanmean(mwr_dict[mwr_key][sii,:], axis=0)
+					else:
+						mwr_master_dict[mwr_key][time_index:time_index + n_samp_real,:] = mwr_dict[mwr_key][sample_idx,:]
 
 				else:
 					raise RuntimeError("Something went wrong in the " +
@@ -3473,6 +3766,7 @@ def import_hatpro_level2a_daterange_xarray(
 		files_filtered = list()
 		for file in files:
 			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
 			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
 			if file_date >= date_start_dt and file_date <= date_end_dt:
 				files_filtered.append(file)
@@ -3480,7 +3774,7 @@ def import_hatpro_level2a_daterange_xarray(
 		DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested', preprocess=remove_vars)
 
 		# 'repair' some variables:
-		DS['flag'][np.isnan(DS['flag'])] = 0.
+		DS['flag'][np.isnan(DS['flag']).load()] = 0.
 		DS['time'] = np.rint(DS['time']).astype(float).astype('datetime64[s]')
 
 
@@ -3493,6 +3787,7 @@ def import_hatpro_level2a_daterange_xarray(
 			# files_filtered = list()
 			# for file in files:
 				# ww = file.find(sub_str) + l_sub_str
+				# if file.find(sub_str) == -1: continue
 				# file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
 				# if file_date >= date_start_dt and file_date <= date_end_dt:
 					# files_filtered.append(file)
@@ -3526,23 +3821,25 @@ def import_hatpro_level2a_daterange_xarray(
 def import_mirac_level1b_daterange_pangaea(
 	path_data,
 	date_start,
-	date_end):
+	date_end=None):
 
 	"""
 	Runs through all days between a start and an end date. It concats the level 1b TB time
-	series of each day so that you'll have one dictionary, whose 'TB' will contain the IWV
+	series of each day so that you'll have one dictionary, whose 'TB' will contain the TB
 	for the entire date range period.
 
 	Parameters:
 	-----------
 	path_data : str
-		Base path of level 1 data. This directory contains subfolders representing the year, which,
-		in turn, contain months, which contain day subfolders. Example path_data:
-		"/data/obs/campaigns/mosaic/mirac-p/l1/"
-	date_start : str
-		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
-	date_end : str
-		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+		Path of level 1 (brightness temperature, TB) data. This directory contains daily files
+		as netCDF.
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case.
+	date_end : str or None
+		If date_start is str: Marks the last day of the desired period. To be specified in 
+		yyyy-mm-dd (e.g. 2021-01-14)!
 	"""
 
 	def cut_vars(DS):
@@ -3550,9 +3847,11 @@ def import_mirac_level1b_daterange_pangaea(
 		return DS
 
 
-	# extract day, month and year from start date:
-	date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
-	date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
+	elif type(date_start) == type([]) and date_end:
+		raise ValueError("'date_end' should be none if 'date_start' is a list of strings.")
 
 
 	# Identify files in the date range: First, load all into a list, then check which ones 
@@ -3562,13 +3861,32 @@ def import_mirac_level1b_daterange_pangaea(
 	l_sub_str = len(sub_str)
 	files = sorted(glob.glob(path_data + "MOSAiC_uoc_lhumpro-243-340_l1_tb_v01_*.nc"))
 
-	# run through list: identify where date is written and check if within date range:
-	files_filtered = list()
-	for file in files:
-		ww = file.find(sub_str) + l_sub_str
-		file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
-		if file_date >= date_start and file_date <= date_end:
-			files_filtered.append(file)
+
+	# extract day, month and year from start date:
+	if type(date_start) == type(""):
+		date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+		date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date >= date_start and file_date <= date_end:
+				files_filtered.append(file)
+	else:
+		# extract day, month and year from date_start:
+		date_list = [dt.datetime.strptime(ddd, "%Y-%m-%d") for ddd in date_start]
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date in date_list:
+				files_filtered.append(file)
 
 
 	# load data:
@@ -3578,9 +3896,11 @@ def import_mirac_level1b_daterange_pangaea(
 	for vava in interesting_vars:
 		if vava not in ['freq_sb', 'freq_shift', 'tb_absolute_accuracy', 'tb_cov']:
 			mwr_dict[vava] = DS[vava].values.astype(np.float64)
+
 	mwr_dict['flag'][np.isnan(mwr_dict['flag'])] = 0.
 	mwr_dict['time'] = np.rint(mwr_dict['time']).astype(float)
 	DS.close()
+
 	DS = xr.open_dataset(files_filtered[0], decode_times=False)
 	mwr_dict['freq_sb'] = DS.freq_sb.values.astype(np.float32)
 	mwr_dict['freq_shift'] = DS.freq_shift.values.astype(np.float32)
@@ -3588,6 +3908,7 @@ def import_mirac_level1b_daterange_pangaea(
 	mwr_dict['tb_cov'] = DS.tb_cov.values.astype(np.float32)
 
 	DS.close()
+	del DS
 
 	return mwr_dict
 
@@ -3595,7 +3916,7 @@ def import_mirac_level1b_daterange_pangaea(
 def import_mirac_level2a_daterange_pangaea(
 	path_data,
 	date_start,
-	date_end,
+	date_end=None,
 	which_retrieval='both'):
 
 	"""
@@ -3607,14 +3928,23 @@ def import_mirac_level2a_daterange_pangaea(
 	-----------
 	path_data : str
 		Path of level 2a data. 
-	date_start : str
-		Marks the first day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case.
 	date_end : str
 		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
 	which_retrieval : str, optional
 		This describes which variable(s) will be loaded. Options: 'iwv' or 'prw' will load the
 		integrated water vapour. 'both' will also load integrated water vapour only. Default: 'both'
 	"""
+
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
+	elif type(date_start) == type([]) and date_end:
+		raise ValueError("'date_end' should be none if 'date_start' is a list of strings.")
+
 
 	# check if the input of the retrieval variable is okay:
 	if not isinstance(which_retrieval, str):
@@ -3633,10 +3963,6 @@ def import_mirac_level2a_daterange_pangaea(
 					which_retrieval = ['prw']
 					
 
-	# extract day, month and year from start date:
-	date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
-	date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
-
 	# Identify files in the date range: First, load all into a list, then check
 	# which ones suit the daterange:
 	mwr_dict = dict()
@@ -3644,13 +3970,31 @@ def import_mirac_level2a_daterange_pangaea(
 	l_sub_str = len(sub_str)
 	files = sorted(glob.glob(path_data + "MOSAiC_uoc_lhumpro-243-340_l2_prw_v01_*.nc"))
 
-	# run through list: identify where date is written and check if within date range:
-	files_filtered = list()
-	for file in files:
-		ww = file.find(sub_str) + l_sub_str
-		file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
-		if file_date >= date_start and file_date <= date_end:
-			files_filtered.append(file)
+	if type(date_start) == type(""):
+		# extract day, month and year from start date:
+		date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+		date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date >= date_start and file_date <= date_end:
+				files_filtered.append(file)
+	else:
+		# extract day, month and year from date_start:
+		date_list = [dt.datetime.strptime(ddd, "%Y-%m-%d") for ddd in date_start]
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date in date_list:
+				files_filtered.append(file)
 
 
 	# laod data:
@@ -3733,6 +4077,7 @@ def import_mirac_level2a_daterange_xarray(
 	files_filtered = list()
 	for file in files:
 		ww = file.find(sub_str) + l_sub_str
+		if file.find(sub_str) == -1: continue
 		file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
 		if file_date >= date_start_dt and file_date <= date_end_dt:
 			files_filtered.append(file)
@@ -3740,7 +4085,7 @@ def import_mirac_level2a_daterange_xarray(
 	DS = xr.open_mfdataset(files_filtered, decode_times=False, concat_dim='time', combine='nested', preprocess=remove_vars)
 
 	# 'repair' some variables:
-	DS['flag'][np.isnan(DS['flag'])] = 0.
+	DS['flag'][np.isnan(DS['flag']).load()] = 0.
 	DS['time'] = np.rint(DS['time']).astype(float).astype('datetime64[s]')
 
 	return DS
@@ -4351,7 +4696,7 @@ def import_radiosonde_daterange(
 			
 			if verbose >= 1:
 				# rs_date = rs_nc[-19:-3]
-				print("Working on Radiosonde, " + rs_nc)
+				print("\rWorking on Radiosonde, " + rs_nc, end="")
 
 			sonde_dict = import_single_NYA_RS_radiosonde(rs_nc, keys=all_keys_import)
 			
@@ -4381,7 +4726,7 @@ def import_radiosonde_daterange(
 			
 			if verbose >= 1:
 				# rs_date = rs_nc[-19:-3]
-				print("Working on Radiosonde, " + rs_nc)
+				print("Working on Radiosonde, " + rs_nc, end='\r')
 
 			sonde_dict = import_single_PS122_mosaic_radiosonde_level2(rs_nc, keys=all_keys_import)
 			if (remove_failed and ((sonde_dict['iwv'] == 0.0) or (np.isnan(sonde_dict['iwv'])) or
@@ -4406,6 +4751,8 @@ def import_radiosonde_daterange(
 		if remove_failed and (rs_idx < n_sondes):
 			for key in geoinfo_keys: sonde_master_dict[key] = sonde_master_dict[key][:rs_idx]
 			for key in time_height_keys: sonde_master_dict[key] = sonde_master_dict[key][:rs_idx,:]
+
+	if verbose >= 1: print("")
 
 	return sonde_master_dict
 
@@ -4849,6 +5196,54 @@ def import_IWV_OE_JR(
 	return IWV_JR_dict
 
 
+def import_OEM_JR_v5(
+	filename,
+	return_DS=False):
+
+	"""
+	Imports the OE results from satellite-based IWV retrieval (v5) performed by Janna Rückert.
+	Time will be converted to seconds since 1970-01-01 00:00:00 UTC and np.datetime64.
+
+	Parameters:
+	-----------
+	filename : str
+		Path and filename of the .csv table that includes the IWV data.
+	"""
+
+	# open the csv and read it:
+	with open(filename, newline='') as csvfile:
+
+		csv_reader = csv.reader(csvfile, delimiter=',')
+		list_of_lines = list()
+		for row in csv_reader:
+			list_of_lines.append(row)
+		n_lines = len(list_of_lines) - 1		# -1 to ignore the first line
+
+
+	IWV_JR_dict = {'IWV': np.full((n_lines,), np.nan),
+					'IWV_std': np.full((n_lines,), np.nan),
+					'time': np.full((n_lines,), np.nan),
+					'time_npdt': np.full((n_lines,), np.datetime64("1970-01-01T00:00:00"))}
+	# save data to dict:
+	for k, c_line in enumerate(list_of_lines[1:]):		# skip first line
+		IWV_JR_dict['IWV'][k] = float(c_line[1])
+		IWV_JR_dict['IWV_std'][k] = float(c_line[2])
+		IWV_JR_dict['time_npdt'][k] = np.datetime64(c_line[0]).astype("datetime64[s]")
+		IWV_JR_dict['time'][k] = IWV_JR_dict['time_npdt'][k].astype("float64")
+
+
+	# create xarray dataset if desired:
+	if return_DS:
+		DS = xr.Dataset({'IWV':			(['time'], IWV_JR_dict['IWV'],
+										{'units': "kg m-2"}),
+						'IWV_std':		(['time'], IWV_JR_dict['IWV_std'],
+										{'units': "kg m-2"})},
+						coords={'time': (['time'], IWV_JR_dict['time_npdt'])})
+		return DS
+	else:
+		return IWV_JR_dict
+
+
 def import_PS_mastertrack_tab(filename):
 
 	"""
@@ -5074,7 +5469,8 @@ def import_MOSAiC_Radiosondes_PS122_Level2_tab(filename):
 
 def import_radiosondes_PS131_txt(
 	files,
-	add_info=False):
+	add_info=False,
+	add_loc_info=False):
 
 	"""
 	Imports radiosonde data gathered during PS131 from Polarstern during the ATWAICE
@@ -5092,11 +5488,16 @@ def import_radiosondes_PS131_txt(
 	add_info : bool
 		If True, auxiliary information is added to the returned dictionary 
 		(i.e., operator of radiosonde, max altitude before burst).
+	add_loc_info : bool
+		If True, latitude and longitude position of the radiosonde at launch will be provided in
+		the returned dictionary as well. The data is extracted from the radiosonde .txt file 
+		header.
 	"""
 
 	n_sondes = len(files)		# just a preliminary assumption of the amount of radiosondes
 	n_data_per_sonde = 12000	# assumption of max. time (data) points per sonde
 	reftime = dt.datetime(1970,1,1)
+
 	# the radiosonde dict will be structured as follows:
 	# rs_dict['0'] contains all data from the first radiosonde: rs_dict['0']['temp'] contains temperature
 	# rs_dict['1'] : second radiosonde, ...
@@ -5133,6 +5534,16 @@ def import_radiosondes_PS131_txt(
 					if ma_idx != -1:
 						rs_dict[s_idx]['max_alt'] = int(line[ma_idx+len("MAXIMUM ALTITUDE: "):line.find("\n")-1])
 
+				if add_loc_info:
+					lat_idx = line.find("LATITUDE: ")
+					lon_idx = line.find("LONGITUDE: ")
+					if lat_idx != -1:
+						rs_dict[s_idx]['ref_lat'] = float(line[lat_idx+len("LATITUDE: "):line.find("*")-1])
+
+					if lon_idx != -1:
+						rs_dict[s_idx]['ref_lon'] = float(line[lon_idx+len("LONGITUDE: "):line.find("\n")])
+
+
 			else:		# skip header
 				current_line = line.strip().split("\t")		# split by tabs
 
@@ -5159,9 +5570,9 @@ def import_radiosondes_PS131_txt(
 				mm += 1
 
 		# finally truncate unneeded data lines and compute specific humidity and IWV:
-		last_nonnan = np.array([np.where(~np.isnan(rs_dict[s_idx][key]))[0][-1] + 1 for key in rs_dict[s_idx].keys() if key not in ['launch_time', 'launch_time_npdt', 'max_alt', 'op']]).min()
+		last_nonnan = np.array([np.where(~np.isnan(rs_dict[s_idx][key]))[0][-1] + 1 for key in rs_dict[s_idx].keys() if key not in ['launch_time', 'launch_time_npdt', 'max_alt', 'op', 'ref_lat', 'ref_lon']]).min()
 		for key in rs_dict[s_idx].keys(): 
-			if key not in ['launch_time', 'launch_time_npdt', 'op', 'max_alt']:
+			if key not in ['launch_time', 'launch_time_npdt', 'op', 'max_alt', 'ref_lat', 'ref_lon']:
 				rs_dict[s_idx][key] = rs_dict[s_idx][key][:last_nonnan]
 		rs_dict[s_idx]['q'] = convert_rh_to_spechum(rs_dict[s_idx]['temp'], rs_dict[s_idx]['pres'], 
 													rs_dict[s_idx]['relhum'])
@@ -5195,7 +5606,7 @@ def import_PS_mastertrack(
 
 	if type(filename) == list:
 		DS = xr.open_mfdataset(filename, combine='nested', concat_dim='time')
-		return DS
+		if return_DS: return DS
 
 	else:
 
@@ -5319,7 +5730,7 @@ def import_cloudnet_product_daterange(
 					# current day (now_date) to fill the master_dict time axis accordingly.
 	for now_date in (date_start + dt.timedelta(days=n) for n in range(n_days)):
 
-		if verbose >= 1: print("Working on Cloudnet Product, ", now_date)
+		if verbose >= 1: print("\rWorking on Cloudnet Product, ", now_date, end="")
 
 		yyyy = now_date.year
 		mm = now_date.month
@@ -5380,6 +5791,8 @@ def import_cloudnet_product_daterange(
 				master_dict[mwr_key] = master_dict[mwr_key][:last_time_step+1]
 			elif shape_new == time_height_shape_old:
 				master_dict[mwr_key] = master_dict[mwr_key][:last_time_step+1, :]
+
+	if verbose >= 1: print("")
 
 	return master_dict
 
@@ -6138,7 +6551,7 @@ def import_iasi_nc(
 					'satellite_zenith', 'solar_azimuth', 'satellite_azimuth', 'fg_atmospheric_ozone', 'fg_qi_atmospheric_ozone', 'atmospheric_ozone', 
 					'integrated_ozone', 'integrated_n2o', 'integrated_co', 'integrated_ch4', 'integrated_co2', 'surface_emissivity', 
 					'number_cloud_formations', 'fractional_cloud_cover', 'cloud_top_temperature', 'cloud_top_pressure', 'cloud_phase', 
-					'instrument_mode', 'spacecraft_altitude', 'flag_cdlfrm', 'flag_cldnes', 'flag_cdltst', 'flag_daynit', 'flag_dustcld', 
+					'instrument_mode', 'spacecraft_altitude', 'flag_cdlfrm', 'flag_cdltst', 'flag_daynit', 'flag_dustcld', 
 					'flag_numit', 'flag_nwpbad', 'flag_physcheck', 'flag_satman', 'flag_sunglnt', 'flag_thicir', 'nerr_values', 'error_data_index', 
 					'temperature_error', 'water_vapour_error', 'ozone_error', 'co_qflag', 'co_bdiv', 'co_npca', 'co_nfitlayers', 'co_nbr_values', 
 					'co_cp_air', 'co_cp_co_a', 'co_x_co', 'co_h_eigenvalues', 'co_h_eigenvectors', 'hno3_qflag', 'hno3_bdiv', 'hno3_npca', 
@@ -6148,7 +6561,14 @@ def import_iasi_nc(
 					'fg_qi_surface_temperature', 'surface_temperature']
 		remaining_unwanted_dims = ['cloud_formations', 'nlo', 'new']
 
-		DS = DS.drop_vars(unwanted_vars)
+		# check if unwanted_vars exist in the dataset (it may happen that not all variables 
+		# exist in all IASI files):
+		uv_exist = np.full((len(unwanted_vars),), False)
+		for i_u, u_v in enumerate(unwanted_vars):
+			if u_v in DS.variables:
+				uv_exist[i_u] = True
+
+		DS = DS.drop_vars(np.asarray(unwanted_vars)[uv_exist])
 		DS = DS.drop_dims(remaining_unwanted_dims)
 		return DS
 
@@ -6607,3 +7027,129 @@ def import_MOSAiC_Radiosondes_PS122_Level3_tab(filename):
 		rs_dict[str(k)]['IWV'] = rs_dict[str(k)]['IWV'][~np.isnan(rs_dict[str(k)]['IWV'])][-1]
 
 	return rs_dict, attribute_info
+
+
+def import_hatpro_mirac_level2a_daterange_pangaea(
+	path_data,
+	date_start,
+	date_end=None,
+	which_retrieval='both',
+	data_version='v00'):
+
+	"""
+	Imports the synergetic neural network retrieval output combining data from HATPRO and MiRAC-P
+	for all days between a start and an end date or imports data for a certain list of dates. 
+	Each day is concatenated in ascending order.
+
+	Parameters:
+	-----------
+	path_data : str
+		Path of the synergetic retrieval level 2a (IWV (prw), LWP (clwvi)) data. 
+	date_start : str or list of str
+		If str: Marks the first day of the desired period. To be specified in yyyy-mm-dd 
+		(e.g. 2021-01-14)! Requires date_end to be specified. If list of str: Imports only the 
+		dates listes in the list of dates (in yyyy-mm-dd). date_end must be None in this case.
+	date_end : str
+		Marks the last day of the desired period. To be specified in yyyy-mm-dd (e.g. 2021-01-14)!
+	which_retrieval : str, optional
+		This describes which variable(s) will be loaded. Options: 'iwv' or 'prw' will load the
+		integrated water vapour. 'clwvi' or 'lwp' will load the liquid water path. 'both' will 
+		load integrated water vapour and liquid water path. Default: 'both'
+	data_version : str, optional
+		Indicated the version of the data as string. Example: "v00", "v01, "v02".
+	"""
+
+	# identify if date_start is string or list of string:
+	if type(date_start) == type("") and not date_end:
+		raise ValueError("'date_end' must be specified if 'date_start' is a string.")
+	elif type(date_start) == type([]) and date_end:
+		raise ValueError("'date_end' should be none if 'date_start' is a list of strings.")
+
+
+	# check if the input of the retrieval variable is okay:
+	if not isinstance(which_retrieval, str):
+			raise TypeError("Argument 'which_retrieval' must be a string. Options: 'iwv' or 'prw' will load the " +
+				"integrated water vapour. 'both' will also load integrated water vapour only. Default: 'both'")
+
+	else:
+		if which_retrieval not in ['prw', 'iwv', 'clwvi', 'lwp', 'both']:
+			raise ValueError("Argument 'which_retrieval' must be one of the following options: 'iwv' or 'prw' will load the " +
+				"integrated water vapour. 'clwvi' or 'lwp' will load the liquid water path. 'both' will load integrated " +
+				"water vapour and liquid water path. Default: 'both'")
+
+		else:
+			if which_retrieval in ['iwv', 'prw']:
+				which_retrieval = ['prw']
+			elif which_retrieval in ['lwp', 'clwvi']:
+				which_retrieval = ['clwvi']
+			elif which_retrieval == 'both':
+				which_retrieval = ['prw', 'clwvi']
+			else:
+				raise ValueError("Argument '" + which_retrieval + "' not recognized. Please use one of the following options: " +
+						"'iwv' or 'prw' will load the " +
+						"integrated water vapour. 'lwp' or 'clwvi' will load the liquid water path. " +
+						"'both' will load both. Default: 'both'")
+					
+
+	# Identify files in the date range: First, load all into a list, then check
+	# which ones suit the daterange:
+	mwr_dict = dict()
+	sub_str = f"_{data_version}_"
+	l_sub_str = len(sub_str)
+	files = sorted(glob.glob(path_data + f"MOSAiC_uoc_hatpro_lhumpro-243-340_l2_*.nc"))
+
+	if type(date_start) == type(""):
+		# extract day, month and year from start date:
+		date_start = dt.datetime.strptime(date_start, "%Y-%m-%d")
+		date_end = dt.datetime.strptime(date_end, "%Y-%m-%d")
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date >= date_start and file_date <= date_end:
+				files_filtered.append(file)
+	else:
+		# extract day, month and year from date_start:
+		date_list = [dt.datetime.strptime(ddd, "%Y-%m-%d") for ddd in date_start]
+
+		# run through list: identify where date is written and check if within date range:
+		files_filtered = list()
+		for file in files:
+			ww = file.find(sub_str) + l_sub_str
+			if file.find(sub_str) == -1: continue
+			file_date = dt.datetime.strptime(file[ww:ww+8], "%Y%m%d")
+			if file_date in date_list:
+				files_filtered.append(file)
+
+
+	# distinguish between the retrieved products:
+	DS_ret = xr.Dataset()		# dummy dataset
+	if 'prw' in which_retrieval:
+		files_prw = [file for file in files_filtered if "_prw_" in file]
+
+		# load data:
+		if len(files_prw) > 0:
+			DS_p = xr.open_mfdataset(files_prw, concat_dim='time', combine='nested', decode_times=False)
+			DS_ret = DS_p
+
+	if 'clwvi' in which_retrieval:
+		files_clwvi = [file for file in files_filtered if "_clwvi_" in file]
+
+		# load data:
+		if len(files_clwvi) > 0:
+			DS_c = xr.open_mfdataset(files_clwvi, concat_dim='time', combine='nested', decode_times=False)
+			DS_ret = DS_c
+
+	# if both are requested, merge both datasets by just adding the former:
+	if ('prw' in which_retrieval) and ('clwvi' in which_retrieval):
+		if len(files_prw) > 0: DS_ret['prw'] = DS_p['prw']
+
+
+	# 'repair' some variables:
+	DS_ret['flag_h'][np.isnan(DS_ret['flag_h']).load()] = 0.
+	DS_ret['flag_m'][np.isnan(DS_ret['flag_m']).load()] = 0.
+
+	return DS_ret
